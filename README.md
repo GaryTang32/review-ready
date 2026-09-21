@@ -9,6 +9,8 @@ Before   1 commit, 446 reviewable lines, 15 files, a notebook and a lockfile
 After    2 commits, 40 reviewable lines, 3 files, each commit building on its own
 ```
 
+**[Field guide](https://garytang32.github.io/review-ready/)** — the full record: every rule and the reason it exists, every detector by name, and the development history.
+
 ## The problem
 
 Generation got fast. Review did not. A coding agent will hand you 5,000 lines
@@ -92,7 +94,7 @@ Four modes, chosen from what you ask for:
 security, data correctness, cost, concurrency, logging and tests; 33 behaviour
 switches; and function-level measurement of length, nesting, density, loop
 cost and return shape. Every detector has a line it must match and one it must
-not. The full list is in the [field guide](docs/index.html).
+not. The full list is in the [field guide](https://garytang32.github.io/review-ready/).
 
 It is opinionated about things that are easy to get wrong and expensive to
 find later: look-ahead leakage in a feature, a merge with no `validate`, a
@@ -118,7 +120,7 @@ defect found by review or by a run — none was written speculatively.
 
 ## Documentation
 
-The [field guide](docs/index.html) is the full record: every file and what it
+The [field guide](https://garytang32.github.io/review-ready/) is the full record: every file and what it
 is for, every detector by name, the doctrine behind each rule, and the
 development history — three rounds of adversarial review, what each found, and
 what changed as a result.
