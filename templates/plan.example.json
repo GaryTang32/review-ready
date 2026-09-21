@@ -1,0 +1,39 @@
+{
+  "repo": "../..",
+  "base": "<git merge-base origin/main feature/session-cache>",
+  "onto": "origin/main",
+  "source": "feature/session-cache",
+  "check": "PYTHONPATH=src /abs/path/.venv/bin/python -m pytest -q tests/test_cache.py tests/test_client.py",
+  "import_check": "acme",
+  "sign_off": false,
+  "out": "series",
+  "patches": [
+    {
+      "name": "client-extract-request-builder",
+      "message": "msgs/01-client-extract-request-builder.txt",
+      "overlay": {
+        "src/acme/client.py": "overlays/01/src/acme/client.py"
+      },
+      "budget": 80,
+      "mutate": {
+        "file": "src/acme/client.py",
+        "find": "timeout=30",
+        "replace": "timeout=None",
+        "test": "PYTHONPATH=src /abs/path/.venv/bin/python -m pytest -q tests/test_client.py"
+      }
+    },
+    {
+      "name": "cache-reuse-one-session-per-host",
+      "message": "msgs/02-cache-reuse-one-session-per-host.txt",
+      "overlay": {
+        "src/acme/client.py": "overlays/02/src/acme/client.py",
+        "tests/test_client.py": "overlays/02/tests/test_client.py"
+      },
+      "paths": [
+        "src/acme/cache.py"
+      ],
+      "budget": 150,
+      "expect_fail_before": "PYTHONPATH=src /abs/path/.venv/bin/python -m pytest -q tests/test_client.py::test_one_session_per_host"
+    }
+  ]
+}

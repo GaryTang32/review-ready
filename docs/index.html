@@ -1,0 +1,959 @@
+<title>Review Ready Field Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --paper:#F1F2ED; --surface:#FAFAF8; --surface-2:#E7E9E1; --sunk:#EBEDE5;
+  --ink:#17191C; --ink-soft:#565B61; --ink-faint:#8A8F95;
+  --rule:#D6D8CE; --rule-soft:#E2E4DA;
+  --accent:#2C4A87; --accent-ink:#223A6B; --accent-soft:#E2E8F4;
+  --ack:#2E6640; --ack-soft:#DFEBE2;
+  --nak:#9C3A2C; --nak-soft:#F3E2DE;
+  --shadow:0 1px 2px rgba(23,25,28,.06);
+  --serif:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --measure:68ch;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#15171B; --surface:#1C1F24; --surface-2:#242830; --sunk:#111317;
+    --ink:#E6E7E3; --ink-soft:#9CA3AB; --ink-faint:#6E757D;
+    --rule:#2E333A; --rule-soft:#262B31;
+    --accent:#8AA8E6; --accent-ink:#A8BFEE; --accent-soft:#1D2634;
+    --ack:#7FBE92; --ack-soft:#182619;
+    --nak:#E39482; --nak-soft:#2C1C19;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#15171B; --surface:#1C1F24; --surface-2:#242830; --sunk:#111317;
+  --ink:#E6E7E3; --ink-soft:#9CA3AB; --ink-faint:#6E757D;
+  --rule:#2E333A; --rule-soft:#262B31;
+  --accent:#8AA8E6; --accent-ink:#A8BFEE; --accent-soft:#1D2634;
+  --ack:#7FBE92; --ack-soft:#182619;
+  --nak:#E39482; --nak-soft:#2C1C19;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.62;
+  margin:0; padding-inline:20px; padding-block:0;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px;margin:0 auto;display:grid;grid-template-columns:200px minmax(0,1fr);gap:56px;align-items:start}
+@media (max-width:860px){.wrap{grid-template-columns:1fr;gap:0}}
+
+/* ---- rail ---- */
+.rail{position:sticky;top:env(safe-area-inset-top,0px);padding-block:40px 32px;font-size:13.5px}
+@media (max-width:860px){.rail{position:static;padding-block:28px 0;border-bottom:1px solid var(--rule)}}
+.rail .mark{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:18px}
+.rail nav{display:flex;flex-direction:column;gap:1px}
+@media (max-width:860px){.rail nav{flex-direction:row;flex-wrap:wrap;gap:4px 14px;padding-bottom:20px}}
+.rail a{color:var(--ink-soft);text-decoration:none;padding:3px 0;border-left:2px solid transparent;padding-left:12px;margin-left:-12px}
+@media (max-width:860px){.rail a{border-left:0;padding-left:0;margin-left:0}}
+.rail a:hover{color:var(--accent-ink)}
+.rail a.grp{margin-top:14px;font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none}
+@media (max-width:860px){.rail a.grp{display:none}}
+
+/* ---- masthead ---- */
+main{padding-block:40px 96px;min-width:0}
+.masthead{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:14px}
+.kicker{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+h1{font-family:var(--serif);font-weight:600;font-size:clamp(34px,5.4vw,52px);line-height:1.06;letter-spacing:-.018em;margin:0 0 16px;text-wrap:balance}
+.standfirst{font-size:18.5px;line-height:1.55;color:var(--ink-soft);max-width:var(--measure);margin:0}
+.byline{display:flex;flex-wrap:wrap;gap:6px 22px;font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);margin:22px 0 56px;padding-bottom:0}
+.byline b{color:var(--ink-soft);font-weight:500}
+
+/* ---- type ---- */
+h2{font-family:var(--serif);font-weight:600;font-size:27px;line-height:1.2;letter-spacing:-.012em;margin:0 0 4px;text-wrap:balance}
+h3{font-family:var(--serif);font-weight:600;font-size:18.5px;line-height:1.3;margin:0 0 6px;text-wrap:balance}
+h4{font-family:var(--sans);font-weight:600;font-size:14px;line-height:1.4;margin:0 0 4px}
+section{padding-top:52px;scroll-margin-top:24px}
+section > p,section > ul,section > ol{max-width:var(--measure)}
+p{margin:0 0 14px}
+.lede{color:var(--ink-soft);font-size:17px;margin-bottom:26px}
+.sec-no{font-family:var(--mono);font-size:11.5px;letter-spacing:.15em;color:var(--accent);text-transform:uppercase;display:block;margin-bottom:9px}
+a{color:var(--accent-ink)}
+code{font-family:var(--mono);font-size:.875em;background:var(--surface-2);padding:1px 5px;border-radius:2px}
+ul,ol{padding-left:22px;margin:0 0 16px}
+li{margin-bottom:7px}
+li::marker{color:var(--ink-faint)}
+strong{font-weight:600}
+hr.div{border:0;border-top:1px solid var(--rule);margin:52px 0 0}
+
+/* ---- patch email ---- */
+.patch{background:var(--sunk);border:1px solid var(--rule);border-radius:3px;font-family:var(--mono);font-size:12.5px;line-height:1.66;overflow-x:auto;margin:0 0 18px}
+.patch pre{margin:0;padding:16px 18px;white-space:pre}
+.patch .hdr{color:var(--ink-faint)}
+.patch .subj{color:var(--ink);font-weight:600}
+.patch .add{color:var(--ack)}
+.patch .del{color:var(--nak)}
+.patch .sob{color:var(--accent)}
+.patch .cmt{color:var(--ink-faint)}
+.cap{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin:-8px 0 26px;letter-spacing:.02em}
+
+/* ---- chips ---- */
+.chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.07em;padding:2px 7px;border-radius:2px;text-transform:uppercase}
+.chip.ack{background:var(--ack-soft);color:var(--ack)}
+.chip.nak{background:var(--nak-soft);color:var(--nak)}
+.chip.neu{background:var(--accent-soft);color:var(--accent-ink)}
+
+/* ---- modes ---- */
+.modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:3px;margin:0 0 10px}
+.mode{background:var(--surface);padding:18px 18px 20px;display:flex;flex-direction:column;gap:9px}
+.mode .nm{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--accent-ink)}
+.mode .trg{font-size:13px;color:var(--ink-soft);font-style:italic}
+.mode .out{font-size:13.5px;margin:0}
+
+/* ---- steps ---- */
+.steps{display:flex;flex-direction:column;gap:0;margin:0 0 8px;border-top:1px solid var(--rule)}
+.step{display:grid;grid-template-columns:46px minmax(0,1fr);gap:18px;padding:16px 0;border-bottom:1px solid var(--rule-soft)}
+.step .n{font-family:var(--mono);font-size:12px;color:var(--accent);padding-top:3px;letter-spacing:.06em}
+.step .bd{min-width:0}
+.step p{margin:0;font-size:14.5px;color:var(--ink-soft);max-width:var(--measure)}
+.step p + p{margin-top:8px}
+
+/* ---- tables ---- */
+.tw{overflow-x:auto;margin:0 0 18px;border:1px solid var(--rule);border-radius:3px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;background:var(--surface)}
+th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-faint);font-weight:500;background:var(--surface-2);border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+td code{background:transparent;padding:0;color:var(--accent-ink)}
+.num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+
+/* ---- callout ---- */
+.note{border-left:3px solid var(--accent);background:var(--surface);padding:15px 18px;margin:0 0 20px;max-width:var(--measure);border-radius:0 3px 3px 0}
+.note.warn{border-left-color:var(--nak)}
+.note p{margin:0;font-size:14.5px;color:var(--ink-soft)}
+.note p + p{margin-top:9px}
+.note b{color:var(--ink)}
+
+/* ---- flags ---- */
+.flags{display:grid;gap:0;border-top:1px solid var(--rule-soft);margin:6px 0 20px}
+.flag{display:grid;grid-template-columns:minmax(140px,max-content) minmax(0,1fr);gap:6px 20px;padding:10px 0;border-bottom:1px solid var(--rule-soft);font-size:14px}
+@media (max-width:620px){.flag{grid-template-columns:1fr;gap:2px}}
+.flag dt{font-family:var(--mono);font-size:12.5px;color:var(--accent-ink)}
+.flag dd{margin:0;color:var(--ink-soft)}
+
+/* ---- prune list ---- */
+.prune{counter-reset:p;list-style:none;padding:0;margin:0 0 18px;columns:2;column-gap:36px}
+@media (max-width:720px){.prune{columns:1}}
+.prune li{counter-increment:p;position:relative;padding-left:26px;margin-bottom:11px;font-size:14px;color:var(--ink-soft);break-inside:avoid}
+.prune li::before{content:counter(p,decimal-leading-zero);position:absolute;left:0;top:1px;font-family:var(--mono);font-size:11px;color:var(--accent)}
+
+/* ---- score ---- */
+.scores{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:3px;margin:0 0 12px}
+.score{background:var(--surface);padding:15px 16px}
+.score .v{font-family:var(--serif);font-size:27px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.score .l{font-size:12.5px;color:var(--ink-soft);margin-top:6px;line-height:1.35}
+
+.foot{margin-top:72px;padding-top:22px;border-top:2px solid var(--ink);font-size:13px;color:var(--ink-faint);max-width:var(--measure)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+<aside class="rail">
+  <div class="mark">review-ready</div>
+  <nav>
+    <a href="#why">The problem</a>
+    <a href="#start">Getting started</a>
+    <a href="#modes">Four modes</a>
+    <a class="grp">Doctrine</a>
+    <a href="#rules">Ground rules</a>
+    <a href="#prune">What gets pruned</a>
+    <a href="#message">Commit messages</a>
+    <a href="#comments">Comments</a>
+    <a href="#risks">Risks a clean diff carries</a>
+    <a href="#switches">Behaviour switches</a>
+    <a href="#gate">Characterization</a>
+    <a class="grp">Running it</a>
+    <a href="#flow">The eight steps</a>
+    <a href="#audit">Audit mode</a>
+    <a href="#verdict">The maintainer pass</a>
+    <a class="grp">Reference</a>
+    <a href="#scripts">Scripts</a>
+    <a href="#plan">plan.json</a>
+    <a href="#refs">Reference files</a>
+    <a href="#files">Every file</a>
+    <a href="#detectors">Every detector</a>
+    <a class="grp">Evidence</a>
+    <a href="#record">How it was built</a>
+    <a href="#proof">Validation</a>
+    <a href="#limits">Limits</a>
+  </nav>
+</aside>
+
+<main>
+  <header class="masthead">
+    <div class="kicker">Skill documentation &middot; 101</div>
+    <h1>Review Ready Field Guide</h1>
+    <p class="standfirst">The pre-PR pass. Run it when development on a branch is finished and before the pull request exists. It builds a clean series beside your branch, has it reviewed, and then moves the branch onto it, so the PR that opens is small, obvious, and would be ACKed by a Linux kernel maintainer in 2000.</p>
+  </header>
+  <div class="byline">
+    <span><b>Location</b> ~/.claude/skills/review-ready</span>
+    <span><b>Modes</b> pre-pr &middot; write &middot; review &middot; audit</span>
+    <span><b>Parts</b> 14 references &middot; 8 scripts &middot; 3 templates &middot; ~10k lines</span>
+  </div>
+
+  <section id="why">
+    <span class="sec-no">The problem</span>
+    <h2>Generation got fast. Review did not.</h2>
+    <p class="lede">A coding agent returns a task-sized change for a task-sized prompt. It does not decompose the work, respect a diff budget, or stop at the edge of what you asked. The result lands on the one step that never got faster.</p>
+    <p>Before agents, the cost of writing code was the throttle, and it enforced good behaviour for free. A person produced a couple hundred good lines a day, so a large change meant weeks on a branch, and nobody tolerated that much drift from main. Writing and understanding were the same act, so you could only write as much as you could hold in your head. Laziness kept diffs lean: no test for a trivial getter, no docstring on every helper, no guard against impossible states. Reuse was cheaper than writing, so you looked for the existing utility first.</p>
+    <p>Every one of those brakes is now released, and one thing is worse than merely unchanged. Clean code used to be a proxy for a careful author. Reviewers leaned on that proxy without knowing it. A model produces textbook style whether or not the logic is right, so polish no longer signals correctness, and uniform polish hides where the risk is: human code has texture, and the hard part looks hard. Errors moved from syntax, which every linter catches, to semantics, which none of them do.</p>
+    <div class="note">
+      <p><b>What this skill does about it.</b> It puts the brakes back, but as mechanism rather than social pressure. The rules are old. The enforcement is a script that refuses to build a series whose commits do not each stand alone, and a reviewer that never shares the author's context.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section id="start">
+    <span class="sec-no">Getting started</span>
+    <h2>Say what you want in your own words.</h2>
+    <p class="lede">There is nothing to install and no command to memorise. The skill is already on disk; describing the situation is what invokes it.</p>
+    <p>Any of these will reach it, and the wording picks the mode:</p>
+    <div class="patch"><pre>I've finished this branch. Clean it up before I open the PR.
+This branch is 4,000 lines and I only asked for a dedupe.
+Would a kernel maintainer ACK this?
+Implement the spec the kernel way, as a patch series.
+Read the whole repo and tell me if it's clean. Restructure it.</pre></div>
+    <p>It works on a repository under git, because everything it produces is a patch series and everything it promises is checked by building one. On a tree with no version control there is nothing to bisect and no way to revert, so that is the first thing to fix.</p>
+    <p><strong>Your branch moves once, at the end.</strong> The whole pass, which on a large branch is long, happens beside it: the series is built on a detached HEAD in a private worktree and kept in a ref, no branch is created or deleted, and your checkout is never touched. If the session dies half way, you are exactly where you started. Only after the maintainer's ACK does one command move the branch onto the series, and it writes the undo to disk before it prints it.</p>
+    <div class="patch"><pre>feature/dedupe-loader now holds the series (4920739007 -&gt; 0d6e9c644e).
+
+Your branch as you left it: 4920739007a8... (refs/review-ready/original/feature/dedupe-loader)
+
+Put it back, from any branch:
+
+    git -C /path/to/repo checkout -B feature/dedupe-loader refs/review-ready/original/feature/dedupe-loader
+
+written to .review-ready/feature_dedupe-loader/UNDO.md</pre></div>
+    <p class="cap">A rewrite you cannot undo from what you were told is a rewrite you did not consent to. An earlier version printed an undo that only worked from the branch itself; pasted from <code>main</code> a day later, it would have hard-reset <code>main</code>.</p>
+    <p>Work files land in <code>.review-ready/&lt;branch&gt;/</code>, one directory per branch so a second PR never inherits the first one's files, and excluded through git's own exclude file rather than <code>.gitignore</code>, since editing a tracked file would itself be an unrequested change. Untracked files of yours (<code>.env</code>, data, notes) are never touched, and notebooks or data files the series drops are kept in your working directory as untracked copies.</p>
+  </section>
+
+  <hr class="div">
+
+  <section id="modes">
+    <span class="sec-no">Four modes</span>
+    <h2>The mode follows from what you are holding.</h2>
+    <p class="lede">A branch that exists, a spec that does not, a PR you are judging, or a whole tree nobody has justified.</p>
+    <div class="modes">
+      <div class="mode">
+        <div class="nm">pre-pr <span class="chip neu">default</span></div>
+        <div class="trg">"clean up my branch", "before I open the PR"</div>
+        <p class="out">Prunes the branch to what the problem needs, refactors what stays, splits it into small bisectable patches, writes the messages and the PR description, reviews as the maintainer, fixes every NAK, and only then moves the branch onto the series, with the undo written to disk.</p>
+      </div>
+      <div class="mode">
+        <div class="nm">write</div>
+        <div class="trg">"implement this spec the kernel way"</div>
+        <p class="out">The same output, but the series is planned before any code exists. Each patch is written, committed and checked one at a time. A patch heading past its budget is split rather than finished.</p>
+      </div>
+      <div class="mode">
+        <div class="nm">review</div>
+        <div class="trg">"would this pass?", "ACK or NAK"</div>
+        <p class="out">A verdict and nothing else. Changes nothing in the tree, not even the work directory. A missing problem statement is the first NAK; one gets reconstructed from the diff and labelled as reconstructed.</p>
+      </div>
+      <div class="mode">
+        <div class="nm">audit</div>
+        <div class="trg">"read all the code", "restructure it"</div>
+        <p class="out">Maps the whole repo, judges it, proposes a tree whose layout explains itself, and refactors what fails behind characterization tests. Output is still a series.</p>
+      </div>
+    </div>
+    <p class="cap">Say which mode was picked. "Make my branch pass review" is pre-pr, not review: the ask is to fix it, not to judge it.</p>
+  </section>
+
+  <hr class="div">
+
+  <section id="rules">
+    <span class="sec-no">Doctrine</span>
+    <h2>Eleven ground rules, and the reason each exists.</h2>
+    <p class="lede">Every one of them protects a human reviewer with finite attention, which is exactly the constraint a coding agent has no model of.</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:44%">Rule</th><th>Why it is there</th></tr></thead>
+      <tbody>
+        <tr><td>The reader's time is the scarce resource</td><td>Not the author's, and not the tool's. Every other rule is a consequence of this one.</td></tr>
+        <tr><td>One logical change per patch</td><td>A bug fix, a cleanup, an API change and a new user of that API are four patches. A reviewer verifies one claim at a time.</td></tr>
+        <tr><td>Never mix movement with modification</td><td>Nobody can see a one-line logic change inside a 300-line reformat, and that is precisely where the bug will be.</td></tr>
+        <tr><td>Every patch builds and passes on its own</td><td>A series that only works at its tip cannot be bisected, so a regression found next year cannot be pinned to a commit.</td></tr>
+        <tr><td>The series never shows its own history</td><td>The branch is being rebuilt, so new code lands clean the first time. No patch introduces a problem a later patch fixes, and there is no "address review comments" commit. The reviewer sees the change, not the journey.</td></tr>
+        <tr><td>A risk is never fixed silently</td><td>A security hole, a look-ahead leak, a silent NULL coercion, a behaviour change: each is its own patch with its own message and test, or an open question in the PR description. Folding one into an unrelated patch hides exactly what a reviewer most needs to see.</td></tr>
+        <tr><td>What the problem does not need is deferred, not deleted</td><td>It goes to <code>deferred.md</code> with a reason, tagged noise or behaviour. Nothing you paid for is lost, and nothing rides along either. The converse holds too: needed work is never pruned to hit a size number. It becomes stacked PRs.</td></tr>
+        <tr><td>Prefer modifying to adding, and deleting to adding</td><td>The tree already solved most problems once. Deleting code is the best patch there is: negative line count, same tests passing.</td></tr>
+        <tr><td><code>Signed-off-by</code> is the owner's to give</td><td>It means "I have read this and can defend every line in public", which only the person named can say. The series is handed back unsigned with a <code>defence.md</code> beside it; one command signs it once it has been read. The tool signs only when asked to.</td></tr>
+        <tr><td>The branch is never edited, and moves once</td><td>The pruned and refactored versions of files live under the work directory, the builder assembles them beside the branch, and the branch moves at the last step, after the verdict. A prune committed onto the branch would become "the branch as you left it", and the promised undo would restore the tool's work instead of yours.</td></tr>
+        <tr><td>Every fact in a message has a source</td><td>A number, a date, a name or a symptom comes from you, the ticket, or a command whose output is in hand. An agent rebuilding a branch has no "last week's report", and a reviewer loop that demands symptoms will get invented ones unless the rule says where a fact may come from. One "which report?" you cannot answer costs more than any vague sentence.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <hr class="div">
+
+  <section id="prune">
+    <span class="sec-no">Doctrine</span>
+    <h2>The ten things that get cut.</h2>
+    <p class="lede">Each is a habit of generated code, and each is a NAK with a specific objection behind it. Walk every hunk and ask whether the problem statement needs it.</p>
+    <ol class="prune">
+      <li>Whitespace, reformatting, quote style and import reordering on lines not otherwise changed.</li>
+      <li>Drive-by renames and refactors. "While I was here" is a second patch or a deferred item.</li>
+      <li>Abstractions with one user: a class with one method, a base class with one implementation, a config object for two parameters, a factory for one product.</li>
+      <li>Comments and docstrings that restate the signature, carry history, narrate the line below, or outweigh the code they sit on; and type hints added to code this patch does not otherwise change.</li>
+      <li>Defensive code for states that cannot occur, <code>try/except</code> "just in case", and anything that swallows an error.</li>
+      <li>Duplicates of something the tree already has. Search first, reuse, and name what was reused in the message.</li>
+      <li>Tests that assert the implementation, tests of trivial code, and mocks of the thing under test.</li>
+      <li>Generated files, unrelated lockfile churn, notebook outputs and data files.</li>
+      <li>Debug prints, debug logging, TODOs and commented-out code.</li>
+      <li>Options, flags and config knobs nobody asked for.</li>
+    </ol>
+    <p>What survives still gets the taste pass. A function over two screens or three levels deep is flattened with guard clauses or split at its seam. A magic number gets a name. A special case is removed by picking the representation that makes it disappear, which is Linus's linked-list rule: the code that needs no branch for the first element is the code that got the data structure right.</p>
+    <p>Re-run the audit afterwards. If the reviewable line count did not fall substantially, the prune was too gentle. A typical agent-written branch loses half or more here.</p>
+  </section>
+
+  <hr class="div">
+
+  <section id="message">
+    <span class="sec-no">Doctrine</span>
+    <h2>The message explains why. The diff already says what.</h2>
+    <p class="lede">It is the only part of a patch that survives into <code>git log</code>, <code>git blame</code>, and the bisect result someone reads at two in the morning five years from now. Write for that reader.</p>
+    <div class="patch"><pre><span class="subj">loader: drop duplicate (ticker, date) rows, keeping the last</span>
+
+The vendor file repeats a row whenever a close is restated, so
+load_prices() returns two rows for the same ticker and date and every
+downstream mean is weighted toward restated days. Last week's report
+showed AAPL with 23 trading days in a 21-day month.
+
+Keep the last occurrence, since a restatement supersedes the original.
+Using file order rather than a timestamp is deliberate: the vendor file
+carries no restatement time, so file order is the only ordering there is.
+
+The report still sums n_rows over the rows it is given, which is now the
+deduplicated set; no change needed there.
+
+Test: tests/test_loader.py::test_duplicate_dates_keep_last fails on the
+parent commit and passes here.
+
+<span class="sob">Signed-off-by: Your Name &lt;you@example.com&gt;</span></pre></div>
+    <p class="cap">Subject <code>area: imperative summary</code> near 60 characters. Body wrapped at 72, because that is what every tool the reviewer has assumes.</p>
+    <h3>What the shape is doing</h3>
+    <ul>
+      <li><strong>Problem before solution.</strong> The reader must be able to disagree with the diagnosis before they see the cure. A message opening with the fix skipped the part review exists to check.</li>
+      <li><strong>Present tense about the tree, not past tense about you.</strong> "The loader keeps duplicate rows", never "I noticed" or "Updated the loader".</li>
+      <li><strong>Name the alternative you rejected.</strong> One sentence. It stops the reviewer suggesting it and shows the choice was made rather than defaulted into.</li>
+      <li><strong>Say what is deliberately out of scope</strong> when a reader would expect it, which saves a round trip.</li>
+      <li><strong>Say how you tested.</strong> "Ran the tests" is weak. "Fails on the parent, passes here" is a claim the reviewer can check, and the builder now warns when a body never says it.</li>
+      <li><strong>A prep patch ends with "No functional change."</strong> That sentence is a promise, and the reviewer verifies it by looking for any changed test.</li>
+      <li><strong>Never mention the tool.</strong> The reviewer is reviewing a change and the person submitting it.</li>
+    </ul>
+  </section>
+
+  <hr class="div">
+
+  <section id="comments">
+    <span class="sec-no">Doctrine</span>
+    <h2>A comment says what the code is for and how to use it.</h2>
+    <p class="lede">That is the whole brief. Everything else is a cost the reader pays on every visit, and most of it is a cost that grows: prose about code is checked by nothing, so it drifts away from the code silently and then misleads with the authority of a comment.</p>
+    <p>The test is blunt. A ten-line function does not need thirty lines of prose above it. Someone who reads more comment than code to reach the code has been charged twice for one function.</p>
+    <h3>The two things that earn their place</h3>
+    <ul>
+      <li><strong>What this is and how to call it.</strong> One sentence at the top of a module, class or public function. A reader scanning a directory listing should be able to place every file from its first line.</li>
+      <li><strong>The fact the code cannot state.</strong> Units, ranges, what a missing value means, the invariant a loop maintains, why the obvious alternative is wrong, the trap that cost someone a day. This is the only kind that gets more valuable over time, because it is the only kind holding something the code does not already hold.</li>
+    </ul>
+    <div class="patch"><pre><span class="hdr">def</span> sessions_between(start, end):
+    <span class="cmt">"""Trading sessions in [start, end), in the exchange's timezone."""</span>
+    <span class="cmt"># The exchange calendar is authoritative; a naive weekday count is wrong
+    # around holidays, which is what the half-day table below is for.</span>
+    <span class="hdr">return</span> _calendar.sessions_in_range(start, end)</pre></div>
+    <p class="cap">Three lines of prose on three lines of code, and both earn it: the docstring says what you get and that the interval is half-open, the comment says why the obvious implementation is wrong.</p>
+    <h3>The seven kinds that get cut</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:21%">Kind</th><th>The objection</th></tr></thead>
+      <tbody>
+        <tr><td>History</td><td>"git log carries this, and it stays true when the code changes." What the code used to do, who changed it, which release it arrived in, which ticket it closed: a claim about the past that nothing updates when the past is undone.</td></tr>
+        <tr><td>Narration</td><td>"I can read the line under it." It goes stale the moment that statement moves, and it teaches the reader to skip comments.</td></tr>
+        <tr><td>Restating the signature</td><td>"The signature already says that. Now I read it twice." An <code>Args:</code> block repeating parameter names with no fact added is the first thing to rot when a parameter is renamed.</td></tr>
+        <tr><td>Essays in a body</td><td>"A paragraph inside a function is a function waiting to be named." Extract it, and the name is then checked by the compiler and the tests.</td></tr>
+        <tr><td>Banners</td><td>"A section rule in a file means the file is two files." A structural finding, not decoration.</td></tr>
+        <tr><td>Commented-out code</td><td>"Delete it; git remembers." Code behind a <code>#</code> forces every reader to decide whether it matters.</td></tr>
+        <tr><td>TODO</td><td>"Do it, defer it in the cover letter, or delete it." An unowned, undated intention outlives whoever wrote it.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note warn">
+      <p><b>What is not history.</b> A date is not history when the date is the subject: a trading calendar, a fixture, a table of holidays, a regulatory deadline. "Historical" is not history when it describes the data or the behaviour, as in a historical replay. The auditor requires a change-of-code verb or explicit changelog framing before calling a date history, and judging by hand uses the same test. <b>Deleting a comment that documents a domain fact is a worse outcome than leaving one that documents a commit.</b></p>
+      <p>On a real trading repository, the first version of this rule produced nine findings and every one was a market-calendar fact. Tightening it removed all nine and kept the rest.</p>
+    </div>
+    <h3>The budget</h3>
+    <p>A function is flagged when its docstring and comments together outweigh its body and amount to at least eight lines; when a body of three lines or fewer carries a docstring of six or more; and when a docstring runs past twelve lines over a body under twenty. A module docstring past thirty lines is a document that wants to be a document.</p>
+    <p>These find candidates, they do not pass verdicts. A parser whose grammar needs explaining, a numerical routine with a derivation, a public interface with real usage examples: each can legitimately run long. What cannot is a wrapper, an accessor, a dataclass, or a five-line function doing one obvious thing.</p>
+    <h3>Fixing them is its own patch</h3>
+    <p>Removing a comment changes no behaviour, so it lands as a patch saying "No functional change.", verified by seeing that no test moved. Group by file, not by kind: one patch per file reads as a decision someone made about that file, while twenty patches split by category read as a sweep, and a sweep is what nobody reviews. Never mix a comment patch with a logic patch, because a deleted comment beside a changed condition is the classic place a real change hides.</p>
+  </section>
+
+  <hr class="div">
+
+  <section id="risks">
+    <span class="sec-no">Doctrine</span>
+    <h2>Risks a clean diff can still carry.</h2>
+    <p class="lede">Style checks pass on all of these. Each is wrong in a way that reads as correct, which is why generated code is where they hide best. Seventy-two line detectors, ten syntax-tree checks and one check over file names find where to start looking; none of them is a verdict.</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:17%">Domain</th><th>What it looks for</th><th style="width:30%">The maintainer's question</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Data correctness</strong></td><td>Look-ahead in a feature: negative shifts, backward fill, centred windows, a rolling window that includes its own row, a scaler fitted before the split, a shuffled split on dated rows. Shifts across a key with no groupby. A naive clock in market code. Missing values turned into numbers. Chained assignment, joins with no <code>validate</code>, sorts whose tie order is unnamed. Commits inside loops, schema spread across modules.</td><td>"What was knowable when this prediction was made?" and "Previous row of what?"</td></tr>
+        <tr><td><strong>Security</strong></td><td>SQL interpolated at the call or carrying a format field, <code>shell=True</code> or a command string, a pickle-family load, <code>yaml.load</code> with no safe loader, <code>eval</code>, an expression string built by interpolation, <code>verify=False</code>, an HTTP call with no timeout, a path joined with a value from data, a predictable temp path, a world-writable mode, a changed package source. Secrets are hunted in every added text line, not only Python: a known token prefix or private key, a secret-looking literal in YAML or a fixture, a secret default in an env read, a secret in a log call, and a credential file such as <code>.env</code> or <code>*.pem</code> entering the tree.</td><td>"Is anything inside those braces data from outside the process?"</td></tr>
+        <tr><td><strong>Cost</strong></td><td>A loop inside a loop, a membership test against a list, a window recomputed per row, <code>pop(0)</code> on a list, a frame or string grown inside a loop, a full sort to take three items, a cache on a method.</td><td>"What is n here?" If it is small, say so and move on.</td></tr>
+        <tr><td><strong>Concurrency</strong></td><td>Module state mutated through <code>global</code> from pool workers, a future whose result nobody reads, a blocking call inside <code>async def</code>, a coroutine called and never awaited.</td><td>"Who else touches this, and what holds the lock?"</td></tr>
+        <tr><td><strong>Tests</strong></td><td>A test that asserts nothing, one that reads the operator's real database or reaches the network, one that sleeps, one skipped with no reason.</td><td>"Does it fail when the code is broken?"</td></tr>
+      </tbody>
+    </table></div>
+    <h3>The truncation test</h3>
+    <p>The check that ships with any feature patch, and it needs no model and no backtest: a point-in-time feature for row <em>t</em> is unchanged when every row after <em>t</em> is deleted. A z-score over the whole history fails it, because the mean includes next year. A lagged expanding window passes. Most look-ahead bugs fail this one test.</p>
+    <h3>Pandas patterns only fire in pandas files</h3>
+    <p>A <code>round(</code> or a <code>.values</code> in a module that never touches a frame is not a finding, and reporting it teaches the reader to skip the section. Detectors that need pandas or a model library switch off in files with neither. Context-dependent checks use the syntax tree instead of a line pattern: the first version flagged <code>time.sleep</code> as "blocking call inside async def" twelve times in a repository with no async code at all.</p>
+    <div class="note warn">
+      <p><b>A finding is never fixed silently.</b> A confirmed risk in code the branch wrote is fixed in the patch that introduces that code. A risk in code that was already there is its own patch if small and certain, and otherwise an open question in the PR description. It is never folded into an unrelated patch.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section id="switches">
+    <span class="sec-no">Doctrine</span>
+    <h2>Behaviour is not only the lines in the diff.</h2>
+    <p class="lede">Config keys, environment variables, defaults, sample data, import order and the clock all change what code does without appearing as logic. The kernel calls these Kconfig options, module parameters and boot arguments, and requires a new one to arrive in its own documented patch, defaulting to off.</p>
+    <p>So the problem statement carries two things the diff cannot show: the call chain from the entry point down to the changed line, and every switch that controls the behaviour along with the position each is in today. Thirty-three detectors sweep the added lines for them, grouped by kind, plus three rules no line pattern can express.</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:26%">Kind</th><th>What hides there</th></tr></thead>
+      <tbody>
+        <tr><td><code>config</code></td><td>Environment reads, settings imports, feature flags, and CLI flags carrying a default.</td></tr>
+        <tr><td><code>defaults</code></td><td>Parameter defaults, <code>dict.get</code> with a non-None fallback, <code>getattr</code> fallbacks, silent <code>or</code>, NaN coerced away.</td></tr>
+        <tr><td><code>sequence</code></td><td>Module-level calls, registration decorators, cache and retry wrappers, cron and callback registration, mutated globals, dynamic import.</td></tr>
+        <tr><td><code>environment</code></td><td>Wall-clock reads, timezone and locale, dates parsed with an inferred format, unseeded randomness, worker counts, version gates.</td></tr>
+        <tr><td><code>tests</code></td><td>A test that patches a module constant, fakes an environment variable, or asserts a call instead of a result.</td></tr>
+      </tbody>
+    </table></div>
+    <h3>The three commit-level rules</h3>
+    <ul>
+      <li><strong>Config or data changed in the same commit as code.</strong> The reviewer cannot tell whether the code is right for the old data, the new, or neither.</li>
+      <li><strong>A config key nothing reads.</strong> A dead switch tells a reader the behaviour is configurable when it is not, and whoever sets it sees nothing happen.</li>
+      <li><strong>An environment variable read but never set.</strong> Whatever it defaults to is the real, undocumented behaviour.</li>
+    </ul>
+    <div class="note">
+      <p><b>Dark-launch ordering.</b> A patch that flips a switch adds the new path guarded off, so the patch changes nothing. Both positions get a test. Then the default flips in its own patch whose entire diff is the flip, so reverting that one commit is the rollback. Its message states the old behaviour, the new behaviour, why now, and that reverting restores the old. Removing the old path is a later series.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section id="gate">
+    <span class="sec-no">Doctrine</span>
+    <h2>Characterize before you refactor.</h2>
+    <p class="lede">This is the gate, and it is what separates refactoring from rewriting.</p>
+    <p>A refactor changes the code and not the behaviour. If nothing pins the behaviour, you cannot know you did that, so the claim in the commit message is false. A function with no test is a function whose behaviour nobody wrote down; rewriting it does not preserve behaviour, it replaces behaviour with your reading of the code, and the suite still passes because there was nothing there.</p>
+    <div class="steps">
+      <div class="step"><div class="n">i</div><div class="bd"><p><strong>Write a characterization test first, in its own patch.</strong> Not a test of what the function should do: a test of what it does now, including the parts you think are wrong. Feed it a real input, record the actual output, assert that.</p></div></div>
+      <div class="step"><div class="n">ii</div><div class="bd"><p><strong>Run it against the unchanged code.</strong> It must pass. A characterization test that fails on the parent is not characterizing anything, it is a bug report; land it as one, with the fix.</p></div></div>
+      <div class="step"><div class="n">iii</div><div class="bd"><p><strong>Refactor in a separate patch, and do not touch the test.</strong> The test file being unchanged is the reviewer's proof behaviour was preserved. If the refactor forces a test edit, either the test was testing the implementation or the behaviour changed. Both are findings; neither is a refactor.</p></div></div>
+      <div class="step"><div class="n">iv</div><div class="bd"><p><strong>A behaviour change is never a refactor.</strong> A genuine bug gets its own patch, its own failing-then-passing test, a message saying what was wrong, and it is not described as a cleanup.</p></div></div>
+    </div>
+    <p>Where behaviour is genuinely unpinnable in reasonable time, a function that calls a network, a clock and a database in one body, the honest first patch is the seam that makes it testable: pass the dependency in rather than reaching for it. That patch is itself a refactor, so its characterization test sits at the nearest testable boundary one level up, and the message says so.</p>
+  </section>
+
+  <hr class="div">
+
+  <section id="flow">
+    <span class="sec-no">Running it</span>
+    <h2>The eight steps of the pre-PR pass.</h2>
+    <p class="lede">They are numbered because they are genuinely sequential: each one narrows what the next has to decide.</p>
+    <div class="steps">
+      <div class="step"><div class="n">00</div><div class="bd"><h4>Establish the ground</h4><p>First, what do the tests open? A suite that reaches the operator's database or the network is not run blind. Then one command, <code>audit_diff.py</code>, produces the report everything else works from, and its Ground section decides whether the pass can start: the <strong>fork point</strong> and the <strong>target</strong> (fetch moves <code>origin/main</code> and never <code>main</code>, so the fresher one is used); a <strong>test merge</strong> when the target has moved, because a same-line conflict cannot be resolved by anything written at the fork point and is yours to settle on your branch before hours are spent; whether the branch has <strong>more than one author</strong>; whether it is already <strong>published</strong>.</p><p>The test command never runs in your checkout: it runs in an export, and later in a private worktree, of tracked files only. The interpreter is named by absolute path, and on a <code>src/</code> layout the path is <code>PYTHONPATH=src</code>, relative. An absolute one points at your checkout, and every check would then pass or fail on the original code whatever the series contains. An import probe catches that. "Did not run", "timed out" and "vacuous" (green with nothing run, or everything skipped) are reported as themselves, never as pass or fail.</p><p>On a big branch the diff is not read top to bottom: the audit first, the noise classes never, then files by reviewable lines.</p></div></div>
+      <div class="step"><div class="n">01</div><div class="bd"><h4>State the problem, the switches, and the data contract</h4><p>One paragraph on what is wrong in the tree today, how it shows, and what the change does about it. Then the call chain, the switches, the data contract, who outside the repository consumes this code, and one question most reviews skip: <strong>is the diagnosis right?</strong> The failing case is walked through the old code. A fix at the reader for bad rows a writer produces is a symptom patch, however well it is split.</p><p>A problem statement written from a diff always matches the diff, so it counts only once you agree with it. Your request stating what you asked for is that agreement; otherwise you are shown the paragraph and asked once. A question nobody can answer becomes an open question in the PR, never a guess.</p></div></div>
+      <div class="step"><div class="n">02</div><div class="bd"><h4>Prune</h4><p>Edits do not happen on the branch. The version of each file a patch should contain is written under the work directory's <code>overlays/</code>, mirroring the repo path, and the builder assembles them. Overlays are whole files, so a fix made to patch 2's overlay must be carried into patch 3's; the builder reports a later overlay that drops what an earlier patch added.</p><p>Then the ten categories above. Four of them remove <strong>behaviour</strong>, not noise: the <code>except</code> that gets dropped may have been absorbing a real vendor failure. So every dropped hunk gets a line in <code>deferred.md</code>, tagged noise (by class and count) or behaviour (one line each). You decide later; nothing is decided silently.</p></div></div>
+      <div class="step"><div class="n">03</div><div class="bd"><h4>Refactor what stays</h4><p>Shape, algorithm, language contracts, data, security, tests, comments. <strong>Scope is lines inside functions the branch's diff already changes, and files it adds.</strong> Everything else is a deferred item, and the builder enforces it: a file the branch never touched is refused unless the plan gives its reason. A refactor that changes what a caller sees, such as a <code>None</code> return made to raise, is a behaviour change to code you ran and the tool did not, and it is reported to you as one even when it is right.</p></div></div>
+      <div class="step"><div class="n">04</div><div class="bd"><h4>Split into a series, and size the PR</h4><p>Preparatory patches first, each saying "No functional change." and changing no assertion. Then the behaviour change with its tests in the same patch. Then new users of a new interface: a function lands with its first caller, because code nothing calls is dead on <code>main</code>. Then the cleanups.</p><p><strong>Two budgets, because there are two risks.</strong> Edits to existing code can break everyone who depends on it: about 400 reviewable lines, rarely more than eight patches. New self-contained files with their tests, imported by nothing until the last patch, can break nobody: up to about a thousand lines. This is how large features actually landed in 2000: a few small justified patches to shared code, then the new files.</p><p><strong>Past that, a stack.</strong> One plan builds the whole series and a <code>stack</code> field cuts it into branches, each mergeable alone, your branch the top. The first PR is opened alone; the next when it merges. Seven dependent PRs in one morning is a patch bomb, and it got the same answer then: silence.</p></div></div>
+      <div class="step"><div class="n">05</div><div class="bd"><h4>Write the messages, then build</h4><p>One file per patch, with no sign-off line and no <code>---</code> line: the builder commits the file verbatim and refuses both. Then the build, which <strong>never moves your branch</strong>: patch by patch on a detached HEAD in a private worktree, the check after every commit from a cleaned tree, the result kept in a ref. When the target has moved, the series is rebased onto it and checked at every commit there too.</p><p>Two things it prints are read line by line. The <strong>residual</strong>: what your branch had that the series does not, which must equal the deferred list plus the refactors, so a dropped line nobody accounts for is work you lost. And <strong>your branch's original tests run against the rebuilt code</strong>: the per-patch check ran the pruned suite, so this is the only place a behaviour that only a pruned test covered can show.</p></div></div>
+      <div class="step"><div class="n">06</div><div class="bd"><h4>Write the PR description</h4><p>Under forty lines, and it stands alone: the reviewer cannot see <code>deferred.md</code>, so the one-line reasons are the whole deferred list. It says what was run end to end. It carries no "changes since" block: a version is a posting a human received, and rounds of the tool's own review are drafts.</p></div></div>
+      <div class="step"><div class="n">07</div><div class="bd"><h4>The maintainer pass</h4><p>A stranger with the problem statement, the patches, the PR description, the deferred list, the residual and the tree. For every behaviour patch the failing case is walked through the old code, to confirm the diagnosis, and through the new code, to confirm the fix, and both walks are written down. Fix every NAK, rebuild with the same plan, review again. Three rounds is the cap.</p></div></div>
+      <div class="step"><div class="n">08</div><div class="bd"><h4>Run it, land it, hand it back</h4><p>You ran the original branch; nobody has run this code. Where an entry point runs offline it is run at your original tip and at the series and the outputs are compared; otherwise the hand-back opens by telling you to run it before you sign. A <code>defence.md</code> is written: the three questions a maintainer would most likely ask of each patch, answered with file and line, the source of every fact in every message, and every place the refactor changed code you wrote.</p><p>Then one command lands the series and writes <code>UNDO.md</code>. You are asked first only when the branch has more than one author or is published and shared. The hand-back is about a dozen lines and includes one that did not exist before the reviews: <strong>"Behaviour that differs from your branch: &hellip;"</strong>, each item on a line, or "none". Nothing is pushed unless asked.</p></div></div>
+    </div>
+    <div class="note">
+      <p><b>The email test.</b> Before delivering, ask one question of each patch. Could a maintainer in 2000, reading this in a text email with no IDE, no CI and no ticket, understand what it does, why, and whether it is right? If the answer for any patch is no, the series is not done.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section id="audit">
+    <span class="sec-no">Running it</span>
+    <h2>Audit mode: a whole tree, not one diff.</h2>
+    <p class="lede">Clean mode starts from a change someone wrote. Audit mode starts from a repository nobody has justified: read all of it, work out how it is wired, judge it, and change what fails.</p>
+    <p>The authority is real. Two things keep it safe. The output is still a patch series, because authority over the code is not authority over the reviewer's attention. And nothing gets refactored before its behaviour is pinned.</p>
+    <h3>Reading the map before judging</h3>
+    <p>Run <code>repo_map.py</code>, then read its report in this order, because each answer narrows the next:</p>
+    <ol>
+      <li><strong>Entry points.</strong> Everything reachable starts here. A module reachable from no entry point and no test is a candidate for deletion, not for refactoring.</li>
+      <li><strong>The module table.</strong> Any row whose purpose reads <code>defines ...</code> has no docstring, so an outsider cannot place it without reading it. Cheapest finding to fix.</li>
+      <li><strong>Layers and cycles.</strong> A cycle means two modules are really one. Decide which way the dependency should point first, because the answer moves code.</li>
+      <li><strong>Hot spots.</strong> Churn times fan-in is where a defect costs most. A tidy module nobody imports and nobody changes can wait forever.</li>
+      <li><strong>Unresolved calls.</strong> The dead and untested lists are conservative by exactly that much, and the report says so rather than claiming certainty.</li>
+    </ol>
+    <p>Then read the code from the entry points down and trace one complete path end to end before forming an opinion. An audit that never followed a request from entry to storage is a style review in costume.</p>
+    <h3>A layout that explains itself</h3>
+    <p>The target: someone who has never seen the repo opens it, reads the top-level listing, and can say what the system does and where to look. That is a property of layout and naming, not documentation.</p>
+    <ul>
+      <li><strong>Group by role, not by kind.</strong> <code>ingest/</code>, <code>storage/</code>, <code>domain/</code>, <code>cli/</code> says what the code does. <code>helpers/</code>, <code>models/</code>, <code>services/</code> says only what shape it is, which the reader could already see.</li>
+      <li><strong>Depth follows dependency.</strong> Modules importing nothing else sit at the bottom, entry points at the top, and the import graph reads as a stack.</li>
+      <li><strong>One sentence at the top of every module,</strong> saying what it is for and who calls it. Highest value per line in most trees, and it is "No functional change."</li>
+      <li><strong>No catch-all package.</strong> <code>utils/</code> accumulates whatever had no home, which makes it the one package nobody can predict.</li>
+      <li><strong>Tests mirror the tree.</strong> A reader looking for a module's tests should not have to search.</li>
+    </ul>
+    <p>The move lands as pure renames: <code>git mv</code> only, one patch per coherent group, each saying "No functional change." <code>git diff -M</code> shows a rename as a rename, so a 400-line move stays a one-screen review. The split that follows a move is a later patch, so its reviewer gets a real diff instead of a file appearing from nowhere.</p>
+    <h3>Order of the series</h3>
+    <p>Docstrings, then verified deletions, then characterization tests, then pure moves, then splits of oversized modules, then internal refactors, then bug fixes, then anything that changes behaviour. Each stage is separately reviewable and separately revertable.</p>
+    <div class="note warn">
+      <p><b>Stop at a size someone will review.</b> An audit that produces forty patches has produced a backlog, not a series. Land the first coherent group, get it merged, and let the rest be the next series. Say so in the cover letter, with a count of what remains.</p>
+    </div>
+    <h3>What full authority does not license</h3>
+    <ul>
+      <li>Changing behaviour silently. Any behaviour change is called out in its own patch and in the cover letter, whatever the audit thinks of the old behaviour.</li>
+      <li>One large commit.</li>
+      <li>Refactoring what nothing pins. Characterize first, or leave it and say why.</li>
+      <li>Rewriting to taste where the tree has a settled convention. A consistent tree that differs from your preference is not a defect, and PEP 8 says so itself.</li>
+      <li>Touching what the objective does not reach: generated files, vendored code, an excluded subsystem.</li>
+    </ul>
+  </section>
+
+  <hr class="div">
+
+  <section id="verdict">
+    <span class="sec-no">Running it</span>
+    <h2>The maintainer pass, and why it is a stranger.</h2>
+    <p class="lede">The reviewer gets the problem statement, the patches as email, the PR description, the deferred list, the residual, the checklist, and the tree to read. Not the plan, not the conversation, not the reasoning that produced the series.</p>
+    <p>The tree matters because a real maintainer objects mostly to what is <em>not</em> in the diff: "you broke the other caller", "we already have that", "this backs out last week's fix". Three lines of context per hunk cannot answer those. So for every behaviour patch the reviewer takes the failing case from the message, walks it through the new code by hand, and writes the walk in the verdict; and finds every caller of a changed signature with grep rather than inferring it. Form is not correctness: a beautifully described patch with an off-by-one is a NAK, and only the walk finds it. An ACK with no trace under it is not an ACK.</p>
+    <p>It runs as a fresh subagent wherever one is available, because a reviewer who shares the author's context rationalises the author's choices. That is not a theoretical risk. In one validated run the pass caught a defect the author had introduced minutes earlier: flattening a guard to <code>notional &lt;= 0</code> is not the inverse of <code>notional &gt; 0</code> when the value is NaN, so a NaN-priced row would have gone from dropped to counted inside a patch that promised "No functional change".</p>
+    <div class="patch"><pre><span class="hdr"># Maintainer review, round 2</span>
+
+<span class="hdr">Series:</span> main..feature/dedupe-loader-v2, 2 patches
+<span class="hdr">Problem statement:</span> .review-ready/problem.md
+
+<span class="subj">## Verdict: NAK (1 of 2 patches need work)</span>
+
+<span class="hdr">## Patch 1/2: loader: uppercase tickers on read</span>
+<span class="add">ACK</span>
+<span class="cmt">- trace: row "aapl,2024-01-02,185.6" -> load_prices():41 ticker.upper()
+  -> "AAPL"; report groups it with the existing AAPL rows, as claimed.</span>
+
+<span class="hdr">## Patch 2/2: loader: drop duplicate (ticker, date) rows</span>
+<span class="del">NAK</span>
+<span class="cmt">- `except Exception as e:` (loader.py:142): "Which error do you expect,
+  and why is ignoring it correct?" Catch the error you expect, or let it
+  propagate.
+- Message describes the diff. Delete the list; write the reason.</span>
+
+<span class="hdr">## Series-level</span>
+<span class="cmt">- bisect: passes at every patch
+- deferred list: honest</span></pre></div>
+    <p class="cap">An ACK with reservations is a NAK. A maintainer does not merge "mostly fine".</p>
+    <h3>The objection categories</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:24%">Category</th><th>Representative objection</th></tr></thead>
+      <tbody>
+        <tr><td>Approach</td><td>"This treats the symptom. Where do the bad rows come from?" "Wrong layer: who else reads this table and still sees the duplicates?" "Do we want this at all?" These end more series than everything below, and no amount of clean splitting answers them.</td></tr>
+        <tr><td>Scope and separation</td><td>"This patch does three things." "You moved it and modified it." "This is not in the problem statement."</td></tr>
+        <tr><td>Description</td><td>"The message says what, not why." "I can't tell what was wrong before this patch." "How did you test this?" "Where does '23 trading days' come from?" "v2 of what?"</td></tr>
+        <tr><td>Design and taste</td><td>"That's a class with one method." "Base class with one implementation." "Special case for the first one."</td></tr>
+        <tr><td>Correctness and safety</td><td>"Broad except." "Join with no keys, no how, no validate." "Behaviour change with no test." "This doesn't apply to my tree." "You just backed out someone else's fix."</td></tr>
+        <tr><td>Behaviour switches</td><td>"What else controls this?" "Config or data changed in the same commit as code." "Loaded at import time."</td></tr>
+        <tr><td>Audit mode</td><td>"What pins this function's behaviour?" "You call this a refactor: is the test file unchanged?" "You deleted it: what did you grep?"</td></tr>
+        <tr><td>Noise</td><td>"Debug print." "Commented-out code." "Notebook with outputs." "TODO."</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <hr class="div">
+
+  <section id="scripts">
+    <span class="sec-no">Reference</span>
+    <h2>Eight scripts, all read-only until the landing.</h2>
+    <p class="lede">Everything they claim, they check. None imports or executes the code under analysis. Three are reports you run, one builds and lands the series, three are shared modules the reports import, and one is the builder's scenario suite. Their sizes are in <a href="#files">Every file</a>.</p>
+
+    <h3><code>repo_map.py</code> &mdash; read a whole repo and report how it is wired</h3>
+    <div class="patch"><pre>python3 $S/repo_map.py --repo PATH [--src DIR ...] [--md FILE] [--json FILE] [--top N]</pre></div>
+    <p>Answers what a maintainer asks before touching an unfamiliar tree. Reports the layout, what each module is for and which layer it sits in, entry points, import cycles, hot spots by churn times fan-in, functions over the 48-line or 3-level budget, untested public functions, probably-dead definitions, config keys nothing reads, and the calls it could not resolve.</p>
+    <p>It also reports the Python floor the tree declares, so "is <code>X | Y</code> legal here" stops being a guess, and it knows which annotations actually run: under <code>from __future__ import annotations</code> an <code>X | None</code> hint is not reported, while an alias or an <code>isinstance</code> argument is. A file the running interpreter cannot parse is listed at the top of the report, because every absence the map claims is blind to it; duplicates by name and by shape; repo modules imported inside functions, which usually hides a cycle; risk patterns, with inventory-style hits aggregated per file, so "CREATE TABLE in four modules" is the finding rather than twenty-four lines; and tests that assert nothing.</p>
+    <p>Whether a function is pinned by a test comes in three honest tiers: called directly by a test, reachable from one through other code, or merely sharing a name with some identifier in a test, which proves nothing. The earlier bare-name match had called five functions in a real tree "tested" on that last basis, and that list feeds the characterization gate.</p>
+    <p>Call resolution is a documented heuristic, not a type checker. It counts value references and identifier-shaped strings, not just call syntax, so a function passed to <code>sort(key=)</code> or a thread pool is not called dead. On a real 7,760-line repository it found three dead functions with no false positives.</p>
+
+    <h3><code>audit_diff.py</code> &mdash; the pre-PR report</h3>
+    <div class="patch"><pre>python3 $S/audit_diff.py --repo PATH --base REF --head REF [--md FILE]
+                        [--check-tip CMD | --check CMD] [--check-timeout S] [--import-check PKG]</pre></div>
+    <dl class="flags">
+      <div class="flag"><dt>ground</dt><dd>The target, swapped for its remote-tracking ref when the local branch is behind; the fork point; how far the target has moved and whether a test merge is clean; merges inside the branch; every author; the upstream and how far ahead or behind it is. It is printed first because it decides whether the pass can start.</dd></div>
+      <div class="flag"><dt>size by class</dt><dd>Source, test, config, docs, generated, notebook, data, binary, and reviewable lines separated from noise.</dd></div>
+      <div class="flag"><dt>churn</dt><dd>Whitespace-only lines per file, which is the mechanism by which a real change hides.</dd></div>
+      <div class="flag"><dt>commits</dt><dd>Subject length, body presence, mixed file classes, whitespace mixed with logic, missing sign-off, patches over budget.</dd></div>
+      <div class="flag"><dt>smells</dt><dd>Debug prints, broad and swallowed excepts, TODOs, commented-out code, f-strings passed to logging, mock-the-callee tests, and the comment-to-code ratio.</dd></div>
+      <div class="flag"><dt>switches</dt><dd>The thirty-three switch detectors, grouped, plus config keys added and never read.</dd></div>
+      <div class="flag"><dt>risks</dt><dd>Security, data correctness, cost, concurrency, logging and test patterns in added lines, each naming the reference that says what to do.</dd></div>
+      <div class="flag"><dt>public surface</dt><dd>Signatures of public functions that changed or vanished, marked BREAKING or widened. Annotation-only changes are ignored, since adding a type hint breaks no caller. A moved module is reported once, as an import-path change.</dd></div>
+      <div class="flag"><dt>duplicates</dt><dd>New functions whose name the tree already defines, or whose body matches another once names and constants are erased. "Search before writing" was stated four times across the skill and checked by nothing until this.</dd></div>
+      <div class="flag"><dt>changed functions</dt><dd>Over budget, short but dense, hiding a second loop, returning a value on one path and None on another, or documenting a parameter that does not exist. Each carries the share of its lines the branch wrote; under 30% it is pre-existing and out of scope.</dd></div>
+      <div class="flag"><dt>PR size</dt><dd>Reviewable lines split into new files and edits to existing code, because the two carry different risk and different budgets. Past them it says to stack, and never to prune needed work to hit a number.</dd></div>
+      <div class="flag"><dt><code>--check CMD</code></dt><dd>Runs CMD against a <code>git archive</code> export of every commit and names the one where the series breaks, printing what the command said. A command that could not start is reported as "did not run", not as a broken series. The only way to prove bisectability in review mode, since it writes nothing.</dd></div>
+    </dl>
+
+    <h3><code>build_series.py</code> &mdash; build the series beside the branch, then land it</h3>
+    <div class="patch"><pre>python3 $S/build_series.py PLAN.json            <span class="cmt"># build: never moves your branch</span>
+python3 $S/build_series.py PLAN.json --land     <span class="cmt"># the one moment it does</span>
+python3 $S/build_series.py --self-test          <span class="cmt"># 21 situations in scratch repos</span></pre></div>
+    <p>Two acts, on purpose. <strong>Build</strong> commits every patch on a detached HEAD in a private worktree, runs the check after each commit, and records the result at <code>refs/review-ready/series/&lt;branch&gt;</code>. It creates no branch and deletes none. An earlier version used a scratch branch, and an adversarial review showed that one plausible plan value made it delete the owner's branch, reflog included, before any backup existed. <strong>Land</strong> moves the branch once, after the review, and writes <code>UNDO.md</code> first.</p>
+    <p><code>refs/review-ready/original/&lt;branch&gt;</code> is your branch as you left it, written when the first build starts. Every review round takes its whole files, and measures its residual, from that ref, so round three is still compared with your code and not with round two. If you commit on the branch afterwards, the builder stops and asks rather than guessing, and keeps the older original.</p>
+    <p><strong>The gates.</strong> Each one exists because an adversarial reader produced a green build that was wrong:</p>
+    <dl class="flags">
+      <div class="flag"><dt>the base is the fork point</dt><dd>Whole files from a branch carry its view of every line. Built on a <code>main</code> that had moved, a one-line patch also deleted a guard someone else had added, and the tool certified "residual: none". The series is now built where the branch forked and rebased onto the target, checked at every commit there. A local <code>main</code> behind <code>origin/main</code> is refused: fetch never moves it.</dd></div>
+      <div class="flag"><dt>the check tests this tree</dt><dd>The import probe runs with the check's own environment. On a <code>src/</code> layout an absolute <code>PYTHONPATH</code> pointed every check at the owner's checkout, and a deliberately wrong overlay passed. Relative, it fails as it should.</dd></div>
+      <div class="flag"><dt>a check that ran</dt><dd>Exit 126 or 127 is "did not run"; a hung suite is "timed out"; zero tests, or every test skipped, is "vacuous". None of them is a pass, and the owner's own pattern, tests that skip when the database is absent, used to be one.</dd></div>
+      <div class="flag"><dt>fails before and passes after</dt><dd><code>expect_fail_before</code> must fail on the parent's code and pass with the patch. A test name that does not exist, or a missing runner, "fails on the parent" too. The builder also says whether the parent failed by assertion or by error.</dd></div>
+      <div class="flag"><dt>a compile floor</dt><dd>Every changed Python file compiles, even in a repository with no tests. A plan with no check at all must say why.</dd></div>
+      <div class="flag"><dt>scope</dt><dd>A file the branch never touched is refused unless the plan gives its reason. A pre-PR pass cleans what the branch wrote; the rest is audit mode.</dd></div>
+      <div class="flag"><dt>overlays that undo each other</dt><dd>Overlays are whole files, so a review fix made in patch 1's overlay was silently reverted by patch 2's, and the build certified it. A later overlay that drops lines an earlier patch added is now reported.</dd></div>
+      <div class="flag"><dt>your tests, their code</dt><dd>The per-patch check runs the pruned suite. The branch's original test files are run once against the rebuilt code, and each failure must be a deferred feature's test or a change made on purpose.</dd></div>
+      <div class="flag"><dt>the message file</dt><dd>A <code>Signed-off-by</code> line or a <code>---</code> line in a message is refused: the first certifies code you have not read, the second lands in history for ever on a pushed branch.</dd></div>
+    </dl>
+    <p><strong>Landing</strong> refuses tracked edits it would overwrite, a branch whose code changed since the build, and a branch checked out in another worktree. It leaves untracked files alone, keeps an overlay's executable bit, keeps pruned notebooks and data files in your working directory as untracked copies, creates the stack branches, and records the authors and the upstream so the hand-back can say what a force-push would do to colleagues.</p>
+    <p>The <strong>residual</strong> is written as <code>git diff &lt;your branch as you left it&gt; &lt;the series&gt;</code>: a minus line is something your branch had and the series does not. It must equal <code>deferred.md</code> plus the refactors, line for line.</p>
+
+    <h3><code>comment_audit.py</code> &mdash; find comments that cost more than they pay for</h3>
+    <div class="patch"><pre>python3 $S/comment_audit.py --repo PATH [--src DIR ...] [--md FILE] [--json FILE]
+                           [--top N] [--ratio R] [--self-test]</pre></div>
+    <p>Reports, worst first: functions whose comment and docstring lines outweigh their code, history git already holds, <code>Args</code> blocks that add nothing the signature says, comments that paraphrase the line under them, essays inside a body, banners, and commented-out code.</p>
+    <p>Dead code is decided by parsing the comment rather than matching its first word, because prose beginning "if the archive grows past a million rows" and "from it, so no schema change is needed" are not code. Formatter pragmas such as <code>fmt: off</code> are excluded, and a bare annotation never counts, since <code>Note: something</code> parses as one. Seventeen self-test cases run with <code>--self-test</code>, about half of which must produce no finding at all.</p>
+
+    <h3><code>risk_detectors.py</code> &mdash; what a clean-looking line can still get wrong</h3>
+    <div class="patch"><pre>python3 $S/risk_detectors.py   <span class="cmt"># 72 detectors, 0 failing; 24 syntax-tree cases</span></pre></div>
+    <p>Seventy-two line detectors across security, data correctness, cost, concurrency, logging and tests, each with a line it must match and one it must not, under the same names the references use; a verifier fails the skill if a reference names a detector that does not exist. Ten further checks use the syntax tree because a line cannot know where it sits: a commit inside a loop, a string or frame grown inside a loop, a blocking call inside <code>async def</code>, a coroutine never awaited, a <code>return</code> inside <code>finally</code>, a mutable default argument, <code>__eq__</code> defined without <code>__hash__</code>, a generator returned from inside the <code>with</code> that owns its file, and a <code>@contextmanager</code> whose cleanup follows the <code>yield</code> with no <code>finally</code>. Four secret and provenance detectors also run over tests and non-Python files, since a recorded token lives in a fixture, not in the module. Docstring lines are skipped, so prose about <code>date.today()</code> is not code.</p>
+
+    <h3><code>code_metrics.py</code> &mdash; function-level measurements</h3>
+    <div class="patch"><pre>python3 $S/code_metrics.py     <span class="cmt"># 31 checks</span></pre></div>
+    <p>Length and nesting stay the primary budget, because a maintainer reading in <code>less</code> can count lines and indentation and cannot verify a McCabe number. Everything here is secondary and reports only where it disagrees with that budget: cyclomatic complexity for functions that are short but dense, the term count of the largest condition, loops that hide a second loop, return-shape consistency, identifier-blind fingerprints for finding renamed copies, tests that assert nothing, and the caller-facing contract of a public function. <code>with</code> blocks no longer count as nesting: a loader that is for, with, with has no branch in it, and counting them pushed correct resource handling over budget.</p>
+
+    <h3><code>switch_detectors.py</code> &mdash; the detector list, with its own self-test</h3>
+    <div class="patch"><pre>python3 $S/switch_detectors.py   <span class="cmt"># 33 detectors, 0 failing</span></pre></div>
+    <p>Each detector carries one line it must match and one it must not. Run the file and it checks all of them, plus the three commit-level rules. It errs toward noise on purpose: a pattern that fires on a string literal costs a glance, while a switch no pattern matches costs a bisect. Every name is listed in <a href="#detectors">Every detector</a>.</p>
+
+    <h3><code>selftest_build.py</code> &mdash; the builder's scenario suite</h3>
+    <div class="patch"><pre>python3 $S/build_series.py --self-test   <span class="cmt"># 22 cases, 0 failing</span></pre></div>
+    <p>The builder is the only script that can move anything of yours, so it is the only one whose tests are whole situations rather than inputs. Each case creates a repository, puts it in a state that once went wrong, runs the builder, and asserts on the exit code, on what was printed, and on the resulting git state: which branch points where, which refs exist, what is left in the working tree. They run in about a minute, and the verifier runs them after every edit.</p>
+  </section>
+
+  <hr class="div">
+
+  <section id="plan">
+    <span class="sec-no">Reference</span>
+    <h2>plan.json, annotated.</h2>
+    <p class="lede">The plan says how each patch is constructed. Four mechanisms cover every case, and the rest are claims the builder then verifies.</p>
+    <div class="patch"><pre>{
+  <span class="hdr">"repo"</span>: "../..",                 <span class="cmt">// the plan lives in .review-ready/&lt;branch&gt;/</span>
+  <span class="hdr">"base"</span>: "4d3f559",                <span class="cmt">// the FORK POINT: git merge-base &lt;onto&gt; &lt;source&gt;</span>
+  <span class="hdr">"onto"</span>: "origin/main",            <span class="cmt">// the PR's target; the finished series is
+                                    rebased onto it, checked at every commit</span>
+  <span class="hdr">"source"</span>: "feature/x",            <span class="cmt">// your branch; omit in write mode, and
+                                    name the new "branch" instead</span>
+  <span class="hdr">"check"</span>: "PYTHONPATH=src /abs/.venv/bin/python -m pytest -q",
+  <span class="hdr">"check_timeout"</span>: 900,
+  <span class="hdr">"import_check"</span>: "mypkg",         <span class="cmt">// must resolve inside the worktree</span>
+  <span class="hdr">"sign_off"</span>: false,              <span class="cmt">// the owner signs after reading</span>
+  <span class="hdr">"stack"</span>: [{"branch": "feature/x-1-prep", "through": 3}],
+  <span class="hdr">"scope_ok"</span>: {"tests/test_old.py": "characterization test for load()"},
+  <span class="hdr">"patches"</span>: [
+    {
+      <span class="hdr">"name"</span>: "loader-dedupe",
+      <span class="hdr">"message"</span>: "msgs/02-loader-dedupe.txt",
+      <span class="hdr">"author"</span>: "Carol Colleague &lt;carol@example.com&gt;",
+      <span class="hdr">"paths"</span>:   ["pipeline/report.py"],   <span class="cmt">// whole file, as you left it</span>
+      <span class="hdr">"overlay"</span>: {"pipeline/loader.py": "overlays/02/pipeline/loader.py"},
+      <span class="hdr">"patch"</span>:   "hunks/02.patch",         <span class="cmt">// a hand-cut unified diff</span>
+      <span class="hdr">"delete"</span>:  ["pipeline/old.py"],
+      <span class="hdr">"budget"</span>: 150,                      <span class="cmt">// warn past this many lines</span>
+      <span class="hdr">"expect_fail_before"</span>:
+        "python3 -m unittest -q tests.test_loader.T.test_dedupe",
+      <span class="hdr">"mutate"</span>: {"file": "pipeline/loader.py", "find": "&gt; 0",
+                 "replace": "&gt;= 0", "test": "python3 -m unittest ..."}
+    }
+  ]
+}</pre></div>
+    <dl class="flags">
+      <div class="flag"><dt>base / onto</dt><dd>The series is built where the branch forked, so whole files from the branch cannot back out work that landed on the target since, and is then rebased onto the target. The builder refuses a base that is not the fork point, and a local target that is behind its remote, and prints the values to write.</dd></div>
+      <div class="flag"><dt>paths</dt><dd>Takes whole files from your branch as you left it, in every round. Right for file-level splits.</dd></div>
+      <div class="flag"><dt>overlay / patch / delete</dt><dd>For when one file has to change across several patches, which is the common case for the file holding the real change. Overlays mirror the repo path under the patch number and keep the executable bit. Hand-cut hunks are applied with <code>--recount</code>, since a hand-edited header is what an agent gets wrong.</dd></div>
+      <div class="flag"><dt>author</dt><dd>A colleague's work keeps their name. The audit lists every author on the branch before anything is rebuilt, so nobody's patch changes hands unnoticed.</dd></div>
+      <div class="flag"><dt>stack</dt><dd>Cuts one series into stacked PR branches at the patch numbers given; your branch is the top. The builder prints each slice's size and creates the branches at landing, never before, and never over a branch it did not make.</dd></div>
+      <div class="flag"><dt>scope_ok</dt><dd>A file the branch never touched, with the reason it belongs. Without it the build stops: that file is someone else's code, and you would be the one asked to defend it.</dd></div>
+      <div class="flag"><dt>budget</dt><dd>Warns when added plus deleted exceeds it, so a patch drifting past reviewable size says so at build time rather than at review time.</dd></div>
+      <div class="flag"><dt>expect_fail_before</dt><dd>Keeps this patch's test files, reverts every other staged file to the parent, and requires the command to fail; then runs it again with the patch and requires it to pass. Together they prove the test tests the change.</dd></div>
+      <div class="flag"><dt>mutate</dt><dd>For characterization tests, which must pass on the code as it stands. The builder breaks the code on purpose with one textual change, requires the test to fail, and restores the file. A characterization test that survives is <code>assert result is not None</code> in disguise, and the refactor behind it is an unpinned rewrite.</dd></div>
+      <div class="flag"><dt>import_check</dt><dd>Imports the named package inside the worktree, with the check's own environment, and refuses to continue unless it resolves there. An editable install, a stale <code>site-packages</code> copy or an absolute <code>PYTHONPATH</code> silently makes every later check a test of a tree the series never touched.</dd></div>
+    </dl>
+  </section>
+
+  <hr class="div">
+
+  <section id="refs">
+    <span class="sec-no">Reference</span>
+    <h2>Fourteen reference files, and when each is read.</h2>
+    <p class="lede">About 4,100 lines in all, which is exactly why they load on demand: two are always read, and the rest arrive when the audit report or the diff sends the agent to them.</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:24%">File</th><th class="num">Lines</th><th>Read it</th></tr></thead>
+      <tbody>
+        <tr><td><code>maintainer-rules.md</code></td><td class="num">163</td><td>Always, before the first prune. The bar and the reason behind each rule, what the 1996 coding style protects, and the data-specific rules: join dtypes, sort ties, skipna, sessions against calendar days.</td></tr>
+        <tr><td><code>review-checklist.md</code></td><td class="num">281</td><td>Always, before the maintainer pass. What the reviewer is given, listed in one place; the approach objections that end more series than everything else; the NAK list across scope, description, design, correctness, security, data, cost, tests, switches and comments; the ACK conditions, including the written trace; the verdict format.</td></tr>
+        <tr><td><code>commit-message.md</code></td><td class="num">180</td><td>Before writing the first message. Shape, rules, reasons, trailers such as <code>Fixes:</code>, and worked good and bad examples.</td></tr>
+        <tr><td><code>comments.md</code></td><td class="num">127</td><td>When the audit reports comment findings, and in every repo audit. What a comment is for, the seven kinds that get cut, and the domain facts that must survive.</td></tr>
+        <tr><td><code>python-idiom.md</code></td><td class="num">370</td><td>When pruning Python. PEP 8, 20, 257 and 484 as review rules rather than formatting, every conflict with the kernel rules settled, and the Zen mapped line by line.</td></tr>
+        <tr><td><code>python-language.md</code></td><td class="num">382</td><td>When a diff touches types, dataclasses, enums, generators, exceptions, async, context managers or <code>pyproject.toml</code>. The contracts a one-token change can silently alter.</td></tr>
+        <tr><td><code>clean-code-examples.md</code></td><td class="num">420</td><td>When a hunk is ugly and you cannot say why. Eleven runnable bloated-versus-clean pairs, each asserting both versions agree.</td></tr>
+        <tr><td><code>algorithm-smells.md</code></td><td class="num">397</td><td>When the audit reports a cost risk, a duplicate or a dense function, or a loop changed. Twelve rules, then the whole algorithm canon as a one-row-each table: where each family surfaces in ordinary code and the library call that replaces it.</td></tr>
+        <tr><td><code>behaviour-switches.md</code></td><td class="num">307</td><td>At step 1, whenever config, data files, defaults, entry points or the clock are touched, and before the other references: it says which of them the change needs. The seven kinds of switch, the order a flip is landed in, and the 33 detectors.</td></tr>
+        <tr><td><code>data-correctness.md</code></td><td class="num">415</td><td>Whenever a changed function takes or returns rows, a frame, SQL, dates, missing values, features or a model. Opens with a router, so plain Python needs three of its nine sections. Look-ahead and point-in-time correctness, restatement and survivorship, time, missing data, the pandas object model, numerics, and sqlite3 as a store.</td></tr>
+        <tr><td><code>security.md</code></td><td class="num">230</td><td>When the audit reports a security risk, or the diff touches SQL, subprocess, deserialization, paths, secrets or HTTP.</td></tr>
+        <tr><td><code>testing.md</code></td><td class="num">328</td><td>Before writing or judging any test. Doubles, independence, where a test command may run, fixtures that reach the operator's data, invariants a pipeline can assert, and mutation by hand as proof a test is load-bearing.</td></tr>
+        <tr><td><code>engineering-sops.md</code></td><td class="num">346</td><td>For trailers and reposts, concurrency, logging, public API changes, changelogs, project standards, and the policy on external tools: install nothing, run only what the tree already runs.</td></tr>
+        <tr><td><code>repo-audit.md</code></td><td class="num">297</td><td>Before any audit run, and only then: the licence it grants to change code nobody asked about is audit mode's alone. Comprehension, the architecture rules, the characterization gate with its load-bearing check, and the order of the series.</td></tr>
+      </tbody>
+    </table></div>
+    <h3>Where the PEPs yield, and where they win</h3>
+    <p>They conflict with kernel practice in predictable places, and each is settled rather than left ambiguous:</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:38%">Tension</th><th>Settlement</th></tr></thead>
+      <tbody>
+        <tr><td>A docstring on every public thing, against no docstring that restates the signature</td><td>Content does not conflict; coverage does. Public names this patch touched, one fact the signature cannot give, nothing on untouched code.</td></tr>
+        <tr><td>79 columns, against matching the file</td><td>A formatter setting, not a review item. New lines take the tree's limit; unchanged lines are never re-wrapped.</td></tr>
+        <tr><td>Hints everywhere, against hinting only what you change</td><td>PEP 484 sides with the kernel here. A sweep is its own "No functional change." patch, last in the series, or deferred.</td></tr>
+        <tr><td><code>except Exception</code> to log and re-raise, against "broad except"</td><td>Legal at a boundary where the alternative is losing unrelated work, and only when the handler re-raises, exits, or records the error and moves on. In library code, a NAK.</td></tr>
+        <tr><td>"Practicality beats purity", against one logical change per patch</td><td>Practicality governs what the code does. The patch boundary is not a code decision.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <hr class="div">
+
+  <section id="files">
+    <span class="sec-no">Reference</span>
+    <h2>Every file, and what it is for.</h2>
+    <p class="lede">Ten thousand lines in four groups. One is read every time; the rest arrive when something asks for them, which is the only reason a skill this size fits in a working context.</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:27%">File</th><th class="num">Lines</th><th>Its job</th></tr></thead>
+      <tbody>
+        <tr><td colspan="3"><strong>The instruction file</strong> &mdash; loaded in full whenever the skill triggers</td></tr>
+        <tr><td><code>SKILL.md</code></td><td class="num">499</td><td>The four modes, eleven ground rules, and steps 0 to 8. Everything else is reached from here, at the moment it is needed. Kept under 500 lines on purpose: it is the one file that costs context on every run.</td></tr>
+        <tr><td colspan="3"><strong>References</strong> &mdash; 4,243 lines, read on demand</td></tr>
+        <tr><td><code>references/</code> &times;14</td><td class="num">4,243</td><td>Listed in full in the previous section, with the moment each is read.</td></tr>
+        <tr><td colspan="3"><strong>Scripts</strong> &mdash; 5,181 lines, none of which imports the code under analysis</td></tr>
+        <tr><td><code>audit_diff.py</code></td><td class="num">1,111</td><td>The pre-PR report: ground, size, smells, switches, risks, public surface, duplicates, changed functions, comments, and the maintainer's first objections.</td></tr>
+        <tr><td><code>repo_map.py</code></td><td class="num">1,004</td><td>The whole-tree map used by audit mode: layers, entry points, cycles, dead code, the Python floor, test pinning in three honest tiers.</td></tr>
+        <tr><td><code>build_series.py</code></td><td class="num">781</td><td>Builds the series beside the branch and, separately, lands it. The only script that can move anything, which is why it has the scenario suite below.</td></tr>
+        <tr><td><code>risk_detectors.py</code></td><td class="num">654</td><td>72 line detectors, 10 syntax-tree checks, one file-name check, each with a line it must match and one it must not.</td></tr>
+        <tr><td><code>comment_audit.py</code></td><td class="num">605</td><td>Comments that cost more than they pay for, by eight kinds.</td></tr>
+        <tr><td><code>code_metrics.py</code></td><td class="num">466</td><td>Function-level measurement: length, nesting, density, loop cost, return shape, fingerprints, call contract.</td></tr>
+        <tr><td><code>selftest_build.py</code></td><td class="num">387</td><td>22 situations run against the builder in scratch repositories. Each one is a way the tool could once have lost work.</td></tr>
+        <tr><td><code>switch_detectors.py</code></td><td class="num">173</td><td>33 behaviour-switch detectors, shared by the audit and by <code>behaviour-switches.md</code> so there is one list, not two.</td></tr>
+        <tr><td colspan="3"><strong>Templates</strong> &mdash; 165 lines</td></tr>
+        <tr><td><code>plan.example.json</code></td><td class="num">39</td><td>A filled-in plan for a branch that is not any fixture in this repository, so it cannot be copied as an answer.</td></tr>
+        <tr><td><code>cover-letter.md</code></td><td class="num">37</td><td>The PR description: problem, approach, series map, testing, stack, deferred, open questions.</td></tr>
+        <tr><td><code>audit.md</code></td><td class="num">89</td><td>The audit report: what the system does, how it is wired, findings, what is not pinned, the plan, the limits of the audit.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note">
+      <p><b>A verifier checks the whole thing is coherent</b>, and runs after every edit: the frontmatter and its 1,024-character description, the 500-line ceiling, every link and script path, that every reference is reachable from <code>SKILL.md</code> with a rule for when to read it, that every script compiles and every self-test passes, that every runnable Python example in every reference actually runs, that every detector a reference names by its bracketed tag exists in a detector module, that <code>security.md</code> names every security detector and invents none, and that the plan template uses only fields the builder documents.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section id="detectors">
+    <span class="sec-no">Reference</span>
+    <h2>Every detector, by name.</h2>
+    <p class="lede">Listed in full because a finding you cannot look up is a finding you cannot argue with. Each name is the one the report prints, the one the reference uses, and the one the verifier checks exists. None of them is a verdict: a detector finds a place to start reading.</p>
+
+    <h3>Risk, over the added lines &mdash; 72 patterns</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:16%">Group</th><th class="num">N</th><th>Names</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Data correctness</strong></td><td class="num">40</td><td>negative shift or centred window; window includes the current row; backward fill or interpolation; forward fill with no limit; statistic over the whole history; row operation across the key; shuffled or random split; fit call; as-of join with a default unnamed; merge with no validate; key cast through str or float; sort with tie order unnamed; aggregation with skipna unnamed; groupby with dropna unnamed; dropna with no subset; None or NaN coerced silently; equality against NaN; float equality; int of a true division; round on a stored value; chained assignment; chained-assignment warning silenced; series assigned into a frame column; positional escape from alignment; inplace=True; row-wise iteration or apply; read with dtypes inferred; category dtype introduced; naive clock or local date; calendar date taken from a timestamp; zone discarded; fixed-offset zone arithmetic; resample with closed or label unnamed; schema statement; DML statement; plain insert; insert or ignore; stored row rewritten in place; to_sql call; connection as context manager; NOT IN or &lt;&gt; in SQL</td></tr>
+        <tr><td><strong>Security</strong></td><td class="num">18</td><td>SQL interpolated at the call; SQL text carrying a format field; expression string built by interpolation; eval or exec; yaml loaded without a safe loader; pickle-family load; shell=True or a command string; archive extracted without a member check; path joined with a value from data; predictable temp path; world-writable mode; TLS verification disabled; HTTP call with no timeout; private key or known token prefix; secret-looking literal; secret default in an env read; secret-bearing value in a log call; package source changed</td></tr>
+        <tr><td><strong>Cost</strong></td><td class="num">5</td><td>pop(0) or insert(0, x) on a list; membership test against a list literal or list(); sorted() to take the first or last few; cache on a method; recursion limit raised</td></tr>
+        <tr><td><strong>Tests</strong></td><td class="num">5</td><td>test reads the operator's real config or data; test opens a database by a fixed path; test reaches the network; test sleeps; test skipped or expected to fail with no reason</td></tr>
+        <tr><td><strong>Concurrency</strong></td><td class="num">3</td><td>module state mutated with global; future whose result nobody reads; thread started without join or daemon decision</td></tr>
+        <tr><td><strong>Logging</strong></td><td class="num">1</td><td>exception logged without its traceback</td></tr>
+      </tbody>
+    </table></div>
+    <p class="cap">Four of the security names &mdash; a known token prefix, a secret-looking literal, a changed package source, disabled TLS &mdash; also run over every added line of every text file, tests and fixtures included, because that is where a recorded token actually lives. Detectors that need pandas or a model library switch themselves off in a file that has neither.</p>
+
+    <h3>Shape and provenance &mdash; 11 checks a line cannot make</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:38%">Check</th><th>Why a regex cannot do it</th></tr></thead>
+      <tbody>
+        <tr><td>commit inside a loop</td><td>The same call is correct outside one.</td></tr>
+        <tr><td>string built with += inside a loop</td><td>Quadratic in a loop, idiomatic beside one.</td></tr>
+        <tr><td>frame grown in a loop</td><td>Needs to know the target is also read in the value.</td></tr>
+        <tr><td>blocking call inside <code>async def</code></td><td>The first version of this fired on <code>time.sleep</code> twelve times in a repository with no async code at all.</td></tr>
+        <tr><td>coroutine called and never awaited</td><td>Needs the set of async names in the module.</td></tr>
+        <tr><td><code>return</code> inside <code>finally</code></td><td>Swallows the exception being propagated.</td></tr>
+        <tr><td>mutable default argument</td><td>Needs the defaults of a definition, not a line.</td></tr>
+        <tr><td><code>__eq__</code> without <code>__hash__</code></td><td>Python sets <code>__hash__ = None</code>, and the class stops being a dict key.</td></tr>
+        <tr><td>generator returned from inside <code>with</code></td><td>The file closes before the first row is read, and the traceback points away from the bug.</td></tr>
+        <tr><td><code>@contextmanager</code> cleanup outside <code>finally</code></td><td>Cleanup runs only when the body succeeds; a raise leaves the lock.</td></tr>
+        <tr><td>credential file committed</td><td>A file-name check, not a line check: <code>.env</code>, <code>*.pem</code>, <code>id_rsa</code>, <code>service-account.json</code>. <code>.env.example</code> is a template and passes.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Behaviour switches &mdash; 33 patterns, plus three commit-level rules</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:16%">Kind</th><th class="num">N</th><th>Names</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Sequence</strong></td><td class="num">10</td><td>module-level call; dynamic import or reload; registration or scheduling decorator; scheduler or cron registration; callback or signal hook registration; middleware, app, or plugin list edit; decorator with arguments; cache or memoise decorator; global state mutated at runtime; retry, backoff, or sleep</td></tr>
+        <tr><td><strong>Environment</strong></td><td class="num">7</td><td>wall clock read; randomness without a fixed seed; seed set as a global side effect; timezone, locale, or date-format dependence; date parsed with an inferred format; concurrency primitive or worker count; version or platform gate</td></tr>
+        <tr><td><strong>Defaults</strong></td><td class="num">6</td><td>function parameter default; dataclass or model field default; dict.get with a non-None default; getattr with a fallback; silent fallback with <code>or</code>; None or NaN coerced silently</td></tr>
+        <tr><td><strong>Config</strong></td><td class="num">5</td><td>env var read; config or settings read; settings module import; CLI flag with a default; feature flag check</td></tr>
+        <tr><td><strong>Tests</strong></td><td class="num">4</td><td>test patches an attribute or environment; test fakes a module constant; test asserts calls, not results; test sets an environment variable</td></tr>
+        <tr><td><strong>Logging</strong></td><td class="num">1</td><td>f-string in a logging call</td></tr>
+      </tbody>
+    </table></div>
+    <p>Three rules are about a commit rather than a line, and the audit applies them to every commit's file list: config or data changed in the same commit as code; a config key added that nothing reads; an environment variable read that nothing in the tree sets. The first has one exception, which took a review round to find: a line that <em>names</em> code, such as an entry point in <code>pyproject.toml</code>, moves in the patch that moves what it names, or that patch does not start.</p>
+  </section>
+
+  <hr class="div">
+
+  <section id="record">
+    <span class="sec-no">Evidence</span>
+    <h2>How it was built, and what each round found.</h2>
+    <p class="lede">A skill that tells an agent to distrust green checks has no business trusting its own. The loop that produced this one: write it, run it on fixtures with known defects, have readers attack it with evidence, keep a log of every sentence that cost the executor time, fix, repeat.</p>
+
+    <h3>The two kinds of evidence, and why both are needed</h3>
+    <p>An <strong>eval</strong> asks whether an agent following the skill produces a good series, and it is graded by script rather than by reading, against a fixture whose defects were planted on purpose. It is the only honest answer to "does this work". But it cannot find what the skill <em>lets through</em>: a rule that is silently unsafe passes every eval, because the eval never puts the tool in the situation where it loses your work.</p>
+    <p>So the second kind: <strong>adversarial review</strong>. Readers with different lenses &mdash; a maintainer of the year 2000, an agent executing the text literally, the owner's staff engineer &mdash; are asked to find what would make the skill fail, told that praise is not wanted, and required to produce a quoted sentence with a line number or the output of a command they ran. They work in scratch repositories and may break anything. About fifty substantiated findings came out of two rounds, and every one was reproduced independently before a line was changed.</p>
+
+    <h3>Round one: the tool could destroy the thing it was cleaning</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:46%">What was proved</th><th>What changed</th></tr></thead>
+      <tbody>
+        <tr><td>Built on a <code>main</code> that had moved since the fork, whole files taken from the branch reverted a guard a colleague had added to a neighbouring function &mdash; and the tool printed <code>residual: none</code>, certifying it</td><td>The base must be the fork point, and the builder refuses anything else and prints the two values to write. The finished series is rebased onto the target with the check run at every commit there</td></tr>
+        <tr><td>From review round two on, the residual compared the series with its own previous build, so the cross-check that is supposed to catch lost work was vacuous, and the promised undo pointed at the tool's own output</td><td>Every round takes its whole files, and measures its residual, from the branch as the user left it. A tip the user has since committed on stops the build and asks, rather than being guessed at</td></tr>
+        <tr><td>A test command that could not start satisfied "this test must fail on the parent" &mdash; exit 127 is a failure &mdash; so the gate that proves a test tests the change passed vacuously</td><td>Exit 126 or 127 is "did not run", in both scripts, with the shell's own message printed</td></tr>
+        <tr><td>Step 4 told the agent to run the builder before step 5 had written the messages the builder requires</td><td>The build moved to the end of step 5</td></tr>
+        <tr><td>Nothing said where the pruned files should live; committing them onto the branch made the branch's own history the "original", so the undo restored the tool's work instead of the owner's</td><td>A ground rule, and a paragraph at the top of the prune: the branch is never edited, only replaced</td></tr>
+        <tr><td>The maintainer pass could only judge form. Its ACK conditions were all about shape, and it was denied the tree, so "you broke the other caller" and "we already have that" could not be checked by the one party asked to check them</td><td>The reviewer gets the tree read-only, must walk the failing case through the old code and the new and write both walks down, and an ACK on a behaviour patch without a trace under it is not an ACK</td></tr>
+        <tr><td>The tool signed the owner's name to code the owner had never read, while its own reference forbade manufacturing anyone's trailer</td><td>Unsigned by default, with a <code>defence.md</code> beside the series and one command to sign after reading</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Round two: green builds that were wrong</h3>
+    <p>The second round attacked the fixes. Six of its findings were blockers, and one of them ended the previous architecture:</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:46%">What was proved</th><th>What changed</th></tr></thead>
+      <tbody>
+        <tr><td>One plausible plan value made the builder delete the owner's branch, reflog included, before any backup ref existed. The 5,000 lines were reachable from nothing, and the tool printed no undo</td><td><strong>The build was split from the landing.</strong> Building creates no branch and deletes none; the series lives in a ref; landing is a separate command that writes the undo first</td></tr>
+        <tr><td>On a <code>src/</code> layout, the absolute <code>PYTHONPATH</code> the skill itself suggested pointed every check at the owner's checkout. A deliberately wrong overlay passed, and in-place mode would then have moved the branch onto it</td><td>The import probe runs with the check's own environment and must resolve inside the worktree; the text says relative, and says why</td></tr>
+        <tr><td>A check that ran zero tests, or in which every test skipped because a database was absent &mdash; the owner's own pattern &mdash; was reported as a pass</td><td>Vacuous is its own state and stops the build, with an explicit override that must carry a reason</td></tr>
+        <tr><td>The printed undo was relative to whatever was checked out. Pasted from <code>main</code> a day later, it hard-reset <code>main</code> and left the branch alone</td><td>One command that names the branch and works from anywhere, written to <code>UNDO.md</code> before it is printed</td></tr>
+        <tr><td>When the target had changed the same lines, the remedy both the text and the tool printed could never converge: an overlay written at the fork point conflicts again however it is written. The agent would loop until it improvised</td><td>The conflict is the owner's to resolve on their branch, said in both places; and the audit now tests the merge in step 0, before any time is spent</td></tr>
+        <tr><td>"Cut the series into stacked PRs" had no mechanism at all: one plan made one branch, and the obvious reading was refused by the new fork-point guard</td><td>A <code>stack</code> field that cuts one series into branches, sized and reported at build time, created at landing, with the procedure for opening them in order</td></tr>
+        <tr><td>An untracked <code>.env</code> or data directory blocked the in-place build, and the remedy the text gave ("commit or stash") could not clear it &mdash; the improvisations available were to commit a secret or delete the owner's data</td><td>Untracked files are left alone; only tracked edits that would be overwritten stop a landing</td></tr>
+        <tr><td>A review fix written into patch 1's overlay was silently reverted by patch 2's, because overlays are whole files &mdash; and the build certified the result</td><td>A later overlay that drops what an earlier patch added is reported</td></tr>
+        <tr><td>Files the prune dropped were deleted from the owner's working directory by the landing, notebooks and sample data included, and nothing said so</td><td>They are kept as untracked copies and listed in the hand-back</td></tr>
+        <tr><td>The rebuild re-authored every colleague's commit to the local git identity, and no step ever looked at who wrote what</td><td>The audit lists every author before anything is rebuilt; the plan carries a per-patch <code>author</code>; landing asks first</td></tr>
+        <tr><td>The skill could not run at all inside a linked git worktree, where <code>.git</code> is a file &mdash; a traceback from one side and a refusal from the other</td><td>The exclude path is asked of git rather than assumed, and a scenario test runs the whole pass inside a worktree</td></tr>
+      </tbody>
+    </table></div>
+    <p class="cap">The maintainer lens, reading the same material, objected to different things: that a version number is a posting a human received, so a changelog against drafts nobody saw is both noise and a disclosure of the tool's process; that the message rules demanded symptoms and numbers an agent rebuilding from a diff does not have, with no rule saying where a fact may come from; that one size budget for a shared loader and for a new self-contained module is one number for two unlike risks; and that no objection anywhere in the checklist was about the <em>approach</em>. All four are now in the text.</p>
+
+    <h3>Round three: the friction log</h3>
+    <p>By the third round both evals passed in full, so the useful output was elsewhere. Each executor keeps a <strong>friction log</strong>: every sentence that was unclear, contradicted another, or cost them time, quoted, with what happened. It is the cheapest instrument here and it found what review did not.</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:46%">What an executor hit</th><th>What changed</th></tr></thead>
+      <tbody>
+        <tr><td>"The harness resets the shell between calls, so I re-set <code>$S</code> and <code>$W</code> by hand in every single call"</td><td>Step 0 opens with a copy-pasteable block that sets them, and asks git for the exclude path rather than assuming a relative one that fails from anywhere but the repo root</td></tr>
+        <tr><td>The new overlay-drop warning fired on all four builds, on a patch that legitimately refactored one line into two</td><td>A dropped line whose every name and literal still appears in the later file is treated as rewritten, not reverted &mdash; with an override, and a self-test asserting both directions</td></tr>
+        <tr><td>"warning: 1 body line(s) over 72 chars". Finding it took an <code>awk</code>; the re-wrap produced an 81-character line and the same warning again</td><td>The warning names the line and quotes it</td></tr>
+        <tr><td>Two budgets written before the item lists under them grew: "under forty lines" for a cover letter with ten deferred items, "about a dozen lines" for a hand-back with eleven required items</td><td>Both are stated in items now, not lines</td></tr>
+        <tr><td><code>SKILL.md</code> read as inviting an <code>ImportError</code> as proof a test bites; <code>testing.md</code> said that gate is worthless</td><td>The two agree: an error clears the gate and proves no more than an empty file would, so pair it with a mutant</td></tr>
+        <tr><td>The plan template was the eval fixture's own task, handing an agent a two-patch answer before it had read the diff</td><td>Replaced with a branch that exists in no fixture</td></tr>
+        <tr><td>"A loop inside a loop at line 23" on a function whose loops were pre-existing and which the branch had only re-quoted</td><td>A reformatted line is not a line the branch wrote; the share and the loop findings both ignore them now</td></tr>
+        <tr><td>Three references each claimed to be read first</td><td>One reading order, stated once</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note">
+      <p><b>What the executors said worked</b>, recorded because it is evidence too: the line <code>1 public signature(s) BROKEN: load_prices</code> turned a rename from a style question into a caller-breaking one, and keeping the old name then dropped three files and a notebook out of the PR entirely. <code>expect_fail_before</code> distinguishing "failed by assertion" from "failed by ImportError" is what makes a test claim worth writing in a message. And the residual and the original-tests run both cost almost nothing and are the only places a silently lost change can surface.</p>
+    </div>
+
+    <h3>What is left</h3>
+    <p>The third round's two adversarial readers never ran: a session limit stopped them before they wrote anything. Rounds one and two each found blockers, so the honest expectation is that a third would find more. The evals passing is not evidence against that &mdash; it is exactly the gap between the two kinds of evidence that this page opened with.</p>
+  </section>
+
+  <hr class="div">
+
+  <section id="proof">
+    <span class="sec-no">Evidence</span>
+    <h2>How it was validated.</h2>
+    <p class="lede">Two kinds of evidence, because they fail differently: evals, which ask whether an agent following the skill produces a good series, and adversarial review, which asks what the skill lets through.</p>
+    <div class="scores">
+      <div class="score"><div class="v">21/21</div><div class="l">The dedupe branch: 446 reviewable lines to 40, graded by script</div></div>
+      <div class="score"><div class="v">26/26</div><div class="l">The parse-dates branch, including every behaviour switch named</div></div>
+      <div class="score"><div class="v">15/15</div><div class="l">Audit mode, on a fixture with nine planted architecture defects</div></div>
+      <div class="score"><div class="v">86.5%</div><div class="l">Same model, same prompts, no skill</div></div>
+    </div>
+    <p class="cap">The baseline is strong on purpose: a capable model already prunes and splits well when the prompt says "kernel maintainer". What it does not do unprompted is produce the verdict format, name how each change was tested, keep the owner's undo honest, or review with a reviewer that has not seen the author's reasoning.</p>
+    <h3>What is checked, and how often</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:34%">Suite</th><th class="num">Cases</th><th>What it holds</th></tr></thead>
+      <tbody>
+        <tr><td><code>build_series.py --self-test</code></td><td class="num">22</td><td>Whole situations in scratch repositories, each asserting on the exit code, the output and the resulting git state. A branch never moves during a build; the undo restores the user's tip from any branch; a stale base is refused and leaves nothing behind; the target's work survives a rebase; a same-line conflict stops rather than guesses; a nonexistent test proves nothing; a command that cannot start is not a failure; a check that ran nothing is refused; an absolute <code>PYTHONPATH</code> is caught; code that does not compile is never landed; untracked files do not block landing but tracked edits do; an overlay keeps the executable bit; no branch is ever deleted; a message file may not carry a sign-off; a local target behind its remote is refused; the pass runs inside a linked worktree; an out-of-scope file needs a reason; every round is measured against the user's branch; an overlay that undoes an earlier fix is reported; a line a later patch rewrote is not a revert; a stack is cut at landing; write mode lands nothing.</td></tr>
+        <tr><td><code>risk_detectors.py</code></td><td class="num">72 + 24</td><td>Every line detector has a line it must match and one it must not; the syntax-tree checks have positive and negative programs; docstring prose about <code>date.today()</code> must not read as code.</td></tr>
+        <tr><td><code>switch_detectors.py</code></td><td class="num">33 + 3</td><td>The same, plus the three commit-level rules.</td></tr>
+        <tr><td><code>code_metrics.py</code></td><td class="num">31</td><td>Length, nesting, density, loop cost, return shape, fingerprints, the annotation-blind call contract.</td></tr>
+        <tr><td><code>comment_audit.py --self-test</code></td><td class="num">17</td><td>Eight of them must produce no finding at all, which is the half that matters: prose beginning "if the archive grows" is not commented-out code.</td></tr>
+        <tr><td><code>verify_skill.py</code></td><td class="num">15</td><td>The whole skill's coherence, listed above. Run after every edit.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="cap">Every one of the builder's twenty-two is the residue of a real defect: either an adversarial reader produced a green build that was wrong, or a run lost something. None of them was written speculatively.</p>
+    <h3>A real repository</h3>
+    <p>Audit mode was then run on a 7,760-line production tree: 29 modules in one flat directory covering six roles. It produced 29 findings and a 15-patch series, verified at every commit.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Measure</th><th class="num">Before</th><th class="num">After</th></tr></thead>
+      <tbody>
+        <tr><td>Packages</td><td class="num">1</td><td class="num">7</td></tr>
+        <tr><td>Dead definitions</td><td class="num">3</td><td class="num">0</td></tr>
+        <tr><td>Architecture findings</td><td class="num">6</td><td class="num">4</td></tr>
+        <tr><td>Residual against the original tree</td><td class="num">&mdash;</td><td class="num">0 bytes</td></tr>
+      </tbody>
+    </table></div>
+    <p>The two findings that remain are the three oversized modules and one entry point imported by another, all correctly deferred because each needs a characterization test first. The audit also surfaced correctness bugs the series deliberately did not touch, including a command that reported zero rows exactly when it succeeded, because a <code>.get</code> default with a non-None fallback turned a key mismatch into a plausible number.</p>
+    <div class="note">
+      <p><b>Three defects in the skill came out of its own runs</b>, which is the argument for running it on real code rather than only on fixtures. A false pass was possible in the bisect check, because the worktree path is reused and some interpreters keep bytecode outside the tree. The mapper was blind to non-Python switches. And a test command was importing a different checkout through an editable install, which would have certified a series that tested nothing it changed. All three are now fixed and each is checked both ways.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section id="limits">
+    <span class="sec-no">Evidence</span>
+    <h2>What it does not do.</h2>
+    <p class="lede">Stated here because an audit claiming complete knowledge of a tree it inferred from an abstract syntax tree is making a claim it cannot support.</p>
+    <ul>
+      <li><strong>Call resolution is a heuristic.</strong> Every dead-code and untested claim is conservative by the count of unresolved calls, which the report prints. Verify each deletion by hand: grep the whole tree including non-Python files, check whether the package exports it, and remember that "nothing in this tree calls it" is not "nobody calls it" when the tree is a library.</li>
+      <li><strong>Dynamic dispatch is invisible.</strong> A name built at runtime, a plugin discovered by entry point, a template variable, a database column mapped by name.</li>
+      <li><strong>The dead-key scan finds keys never mentioned,</strong> not the commoner case of a key parsed into a config object whose field nothing later reads.</li>
+      <li><strong>Python only.</strong> The taste rules generalise; the scripts do not.</li>
+      <li><strong>It cannot judge whether the problem statement is right.</strong> If the spec is wrong, the series will be a clean implementation of the wrong thing.</li>
+      <li><strong>The maintainer pass is a model reading patches.</strong> It is a strictly better reviewer than the author, because it lacks the author's context. It is not a domain expert who knows your data.</li>
+      <li><strong>Nobody has run the rebuilt series but the tests.</strong> Where an entry point runs offline it is run at your original tip and at the series and the outputs compared; otherwise the hand-back says so in its first line, and the first real execution is yours.</li>
+      <li><strong>A rebase conflict with the target is yours.</strong> When the target changed the same lines, nothing written at the fork point can resolve it, and the tool stops rather than guess which side wins.</li>
+    </ul>
+    <p class="foot">The rules here are not new. They are <code>Documentation/CodingStyle</code> and <code>SubmittingPatches</code> as they stood around 2000, which were written for exactly the constraint a coding agent ignores: one human reviewer, with finite attention, who has to say yes. What changed is that enforcement moved from social pressure on an author who wrote every line, into an instruction file and a script, because the author did not write the code.</p>
+  </section>
+</main>
+</div>

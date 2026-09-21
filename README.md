@@ -1,0 +1,140 @@
+# review-ready
+
+A Claude Code skill. Run it when development on a branch is finished and
+before you open the pull request: it turns a large, AI-written branch into a
+small series of commits a human will actually read.
+
+```
+Before   1 commit, 446 reviewable lines, 15 files, a notebook and a lockfile
+After    2 commits, 40 reviewable lines, 3 files, each commit building on its own
+```
+
+## The problem
+
+Generation got fast. Review did not. A coding agent will hand you 5,000 lines
+in one commit, and every one of them is plausible. The reviewer has the same
+attention they had ten years ago, so the branch either sits unread or gets an
+approval nobody can defend.
+
+The constraint is not new, and neither is the answer. `SubmittingPatches` and
+`CodingStyle`, as they stood around 2000, were written for exactly this: one
+human, finite attention, who has to say yes. This skill applies those rules to
+a branch you already have.
+
+## What it does
+
+1. **Audits** the branch: size against noise, behaviour switches, security and
+   data-correctness risks, public signatures that changed, new code that
+   duplicates the tree, comments that cost more than they pay for.
+2. **States the problem** the branch solves, in one paragraph, and checks the
+   diagnosis against the old code.
+3. **Prunes** what the problem does not need. Everything dropped is recorded,
+   tagged as noise or as behaviour, never deleted silently.
+4. **Refactors** what stays — but only lines inside functions the branch
+   already changed.
+5. **Splits** it into a bisectable series, or into stacked PRs when the work is
+   genuinely large, and writes a real commit message for each patch.
+6. **Reviews** it as a hostile stranger who has not seen your reasoning, and
+   who must walk your failing case through the code by hand before an ACK.
+7. **Lands** it on your branch, once, with a one-command undo.
+
+## Your branch is safe
+
+The whole pass happens *beside* your branch. The series is built on a detached
+HEAD in a private worktree and kept in a ref; no branch is created or deleted;
+your checkout is never touched. If the session dies half way, you are exactly
+where you started.
+
+Only after the review does one command move your branch, and it writes
+`UNDO.md` before it prints anything:
+
+```
+git -C <repo> checkout -B <branch> refs/review-ready/original/<branch>
+```
+
+Untracked files — your `.env`, your data, your notes — are never touched.
+
+## Install
+
+```bash
+git clone https://github.com/YOUR-USERNAME/review-ready ~/.claude/skills/review-ready
+```
+
+That is the whole install. Claude Code picks up skills from
+`~/.claude/skills/`. To check it landed:
+
+```bash
+python3 ~/.claude/skills/review-ready/scripts/build_series.py --self-test
+```
+
+**Requires** Python 3.9+ and git 2.31+. Nothing to pip install: the scripts use
+the standard library only, and never import the code they analyse.
+
+## Use
+
+Ask for it in your own words — it triggers on the intent, not on a command:
+
+> I've finished `feature/dedupe-loader` and I'm about to open the PR. Codex
+> wrote most of it and it's a mess. Clean it up so the PR isn't chunky.
+
+Four modes, chosen from what you ask for:
+
+| Mode | When | What you get |
+|---|---|---|
+| `pre-pr` | "before I open the PR", "too big", "split it" | the series, built beside your branch, reviewed, then landed |
+| `write` | "implement this the kernel way" | the same, planned as a series before any code exists |
+| `review` | "would this pass", "ACK or NAK" | a verdict only; nothing in the tree changes |
+| `audit` | "read the whole repo", "is this codebase clean" | a repo map, an audit report, and a refactor series behind characterization tests |
+
+## What it checks
+
+72 line detectors, 10 syntax-tree checks and one file-name check across
+security, data correctness, cost, concurrency, logging and tests; 33 behaviour
+switches; and function-level measurement of length, nesting, density, loop
+cost and return shape. Every detector has a line it must match and one it must
+not. The full list is in the [field guide](docs/index.html).
+
+It is opinionated about things that are easy to get wrong and expensive to
+find later: look-ahead leakage in a feature, a merge with no `validate`, a
+missing value turned into a number, a naive clock in market code, SQL built
+from a string, a secret in a fixture, a test that skips when a database is
+absent and reports green.
+
+## Everything it claims, it checks
+
+| Suite | Cases |
+|---|---|
+| `build_series.py --self-test` | 22 whole situations in scratch repositories |
+| `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
+| `switch_detectors.py` | 33 detectors + 3 commit-level rules |
+| `code_metrics.py` | 31 |
+| `comment_audit.py --self-test` | 17, eight of which must find nothing |
+
+The builder is the only script that can move anything of yours, so its tests
+are whole situations rather than inputs: each one creates a repository, puts
+it in a state that once went wrong, and asserts on the exit code, the output
+and the resulting git state. Every one of the 22 is the residue of a real
+defect found by review or by a run — none was written speculatively.
+
+## Documentation
+
+The [field guide](docs/index.html) is the full record: every file and what it
+is for, every detector by name, the doctrine behind each rule, and the
+development history — three rounds of adversarial review, what each found, and
+what changed as a result.
+
+## Status and limits
+
+Graded 21/21 and 26/26 on two fixtures with planted defects, and run against a
+7,760-line production tree. Honest limits, stated in full in the guide:
+
+- **Python only.** The taste rules generalise; the scripts do not.
+- **Call resolution is a heuristic**, so every dead-code claim is conservative
+  and the count of unresolved calls is printed beside it.
+- **It cannot judge whether your problem statement is right.** If the spec is
+  wrong, you get a clean implementation of the wrong thing.
+- **The maintainer pass is a model reading patches.** Better than the author,
+  because it lacks the author's context. Not a domain expert who knows your data.
+- **Nobody has run the rebuilt series but the tests.** Where an entry point
+  runs offline it is run before and after and the outputs compared; otherwise
+  the hand-back says so, and the first real execution is yours.
