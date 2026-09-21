@@ -340,7 +340,7 @@ CASES = {
     "to_sql call": ('df.to_sql("prices", conn, if_exists="replace")', 'df.to_parquet(path)'),
     "schema statement": ('conn.execute("CREATE TABLE IF NOT EXISTS prices (k TEXT)")', 'conn.execute("SELECT 1")'),
     "NOT IN or <> in SQL": ('q = "SELECT * FROM t WHERE k NOT IN (SELECT k FROM u)"', 'q = "SELECT * FROM t WHERE k = ?"'),
-    "test opens a database by a fixed path": ('conn = sqlite3.connect("data/newsbot.db")', 'conn = sqlite3.connect(":memory:")'),
+    "test opens a database by a fixed path": ('conn = sqlite3.connect("data/prices.db")', 'conn = sqlite3.connect(":memory:")'),
     "pop(0) or insert(0, x) on a list": ('item = queue.pop(0)', 'item = queue.popleft()'),
     "membership test against a list literal or list()": ('if t in list(universe):', 'if t in universe_set:'),
     "recursion limit raised": ('sys.setrecursionlimit(100000)', 'stack = [root]'),

@@ -978,11 +978,11 @@ def main():
     ap.add_argument("--top", type=int, default=20)
     args = ap.parse_args()
     root = os.path.abspath(args.repo)
-    # --src is a DIRECTORY relative to the repo (src/newsbot), not a package name. A wrong
+    # --src is a DIRECTORY relative to the repo (src/acme), not a package name. A wrong
     # one used to read as an empty, clean tree.
     for d in args.src:
         if not os.path.isdir(os.path.join(root, d)):
-            sys.exit(f"--src {d!r} is not a directory under {root}: pass the package DIRECTORY (src/newsbot), "
+            sys.exit(f"--src {d!r} is not a directory under {root}: pass the package DIRECTORY (src/acme), "
                      "and pass the tests too (--src tests), or tested code reads as dead and untested")
     r = analyse_repo(root, args.src, args.top)
     if r is None:

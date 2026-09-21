@@ -396,7 +396,7 @@ def main():
     findings, stats, errors = [], [], []
     for d in args.src:
         if not os.path.isdir(os.path.join(root, d)):
-            sys.exit(f"--src {d!r} is not a directory under {root}: pass the package DIRECTORY (src/newsbot), not its name")
+            sys.exit(f"--src {d!r} is not a directory under {root}: pass the package DIRECTORY (src/acme), not its name")
     for rel, path in walk(root, args.src):
         try:
             src = open(path, encoding="utf-8", errors="replace").read()

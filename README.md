@@ -57,7 +57,7 @@ Untracked files — your `.env`, your data, your notes — are never touched.
 ## Install
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/review-ready ~/.claude/skills/review-ready
+git clone https://github.com/GaryTang32/review-ready ~/.claude/skills/review-ready
 ```
 
 That is the whole install. Claude Code picks up skills from

@@ -53,7 +53,7 @@ fix. Which commit broke it, and how long has the table been wrong?" No
 detector: `grep -L "^Fixes:" .review-ready/msgs/*`, then read those subjects.
 
 ```bash
-git log -S'keep="first"' --oneline <base> -- src/newsbot/loader.py  # commits that added or removed the token
+git log -S'keep="first"' --oneline <base> -- src/acme/loader.py  # commits that added or removed the token
 git log -1 --abbrev=12 --format='Fixes: %h ("%s")' <sha>            # prints the trailer ready to paste
 ```
 
@@ -283,7 +283,7 @@ Findings in `audit.md`, or lines in `deferred.md` in pre-pr mode: decisions
 for the owner, never fixes folded into a feature series. A pre-pr run meets
 them only when the branch touches `pyproject.toml`, a requirements file or
 the lockfile. python-language.md owns the metadata rules. The owner's tree
-has `src/newsbot`, one `pyproject.toml` with ranges, a committed `uv.lock`.
+has `src/acme`, one `pyproject.toml` with ranges, a committed `uv.lock`.
 
 | Finding | As it appears | Why it matters | Disposal |
 |---|---|---|---|

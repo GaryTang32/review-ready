@@ -24,7 +24,7 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
   "check": "python3 -m unittest -q",   # run in the worktree after every commit; leading VAR=value
                                        # assignments are honoured (PYTHONPATH=src, RELATIVE, never absolute)
   "check_timeout": 900,                # seconds; a hung suite is "timed out", not a hang
-  "import_check": "newsbot",           # package the tests import; must resolve INSIDE the worktree
+  "import_check": "acme",           # package the tests import; must resolve INSIDE the worktree
   "python": "/abs/path/python",        # interpreter for the compile floor when `check` names none
   "sign_off": false,                   # true only when the user asked: a sign-off is the owner
                                        # certifying code they have read
