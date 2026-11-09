@@ -28,7 +28,8 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: twenty-five situations in scratch repos).
+(`build_series.py --self-test`: twenty-five situations in scratch repos;
+`repo_map.py --self-test`: the focus map, eleven cases).
 
 ## References: read the one the moment calls for
 
@@ -41,7 +42,7 @@ touches config, data, defaults, entry points or the clock.
 | [minimal-code.md](references/minimal-code.md) | *always*, before step 3: the rewrite procedure, the shrink moves, the size gate |
 | [maintainer-rules.md](references/maintainer-rules.md) | *always*, before the first prune: the bar and its reasons |
 | [review-checklist.md](references/review-checklist.md) | *always*, before the maintainer pass: the NAK list and the verdict format |
-| [building-and-landing.md](references/building-and-landing.md) | at step 0 and whenever a step points to it: the work directory, where tests run, overlays, the plan, the build's output, landing, the hand-back |
+| [building-and-landing.md](references/building-and-landing.md) | at step 0 and whenever a step points to it: the work directory, where tests run, the focus map, overlays, the plan, the build's output, landing, the hand-back |
 | [commit-message.md](references/commit-message.md) | before writing the first message |
 | [comments.md](references/comments.md) | when the audit reports comment findings, and in every repo audit |
 | [python-idiom.md](references/python-idiom.md) | when rewriting Python: what PEP 8, 20, 257 and 484 decide, and where they yield to the kernel rules |
@@ -123,9 +124,23 @@ target, a test merge with a target that has moved (`CONFLICTS` stops the
 pass), and more than one author or a published branch (both change landing).
 Its size table is the baseline the size gate measures against.
 
-**On a big branch, do not read the diff top to bottom.** Read the audit,
-skip the noise classes entirely, then read files in order of reviewable
-lines, new files last.
+**Then map the code around the diff**, before reading any of it:
+
+```bash
+python3 $S/repo_map.py --repo <repo> --focus <target>..<head> --md $W/focus.md
+```
+
+It reads the head commit from git, never the checkout. For every function
+the branch adds or changes it gives the call chain up from it, each caller
+with the line that calls it, what it calls, and the loops the branch wrote.
+It leads with the additions to act on: used once (inline them), never
+called, called only by tests, already in the tree, and classes with one
+method. It maps the neighbourhood, not the repo: steps 2 and 3 still change
+only what the branch wrote.
+
+**On a big branch, do not read the diff top to bottom.** Read the audit and
+the focus map, skip the noise classes entirely, then read files in order of
+reviewable lines, new files last.
 
 ## Step 1: state the problem, the switches, and the data contract
 
@@ -135,7 +150,9 @@ the missing capability), and what the change does about it. Present tense,
 about the code, not about the author's journey. Then what the diff alone
 will not tell a reviewer:
 
-- **The call chain**, from the entry point down to the changed line.
+- **The call chain**, from the entry point down to the changed line: take
+  it from the focus map, and check it by reading, since the resolver is a
+  heuristic.
 - **The switches**: every config key, environment variable, flag, default,
   data file, import-time effect, clock or seed that controls this behaviour,
   and the position each is in today (behaviour-switches.md).
@@ -156,7 +173,9 @@ agreement; otherwise show them the first paragraph and ask once.
 
 ## Step 2: prune
 
-Walk every hunk and ask whether the problem statement needs it. What goes:
+Start from the focus map's "act on these first" list: an addition nothing
+calls, or only tests call, is the cheapest line to cut. Then walk every hunk
+and ask whether the problem statement needs it. What goes:
 
 1. Whitespace, reformatting, quote style, import reordering on lines not
    otherwise changed.
@@ -186,7 +205,10 @@ own PR). The user decides later; you do not decide silently.
 ## Step 3: rewrite what stays to the minimum
 
 This is the step that makes the PR short. Follow minimal-code.md section 1
-for every file that survived the prune, largest first:
+for every file that survived the prune, largest first, with the focus map
+open. Its single-use additions are the inlines (move 1), its callers' lines
+show what is already guaranteed (move 2), and its duplicates are the reuses
+(move 4):
 
 1. Write the file's contract in five lines at most: what each changed
    function takes, returns and raises, and which tests specify it.
@@ -320,7 +342,7 @@ first posting.
 
 Change roles. The maintainer gets exactly what review-checklist.md's first
 paragraph lists: `problem.md`, the patches, the PR description,
-`deferred.md`, `residual.patch`, `size.md`, that checklist, and the tree
+`deferred.md`, `residual.patch`, `size.md`, `focus.md`, that checklist, and the tree
 read-only. Not the plan, the conversation, or the reasoning that produced
 the series. They read each patch top to bottom as email. Then they do what
 three lines of context cannot:
