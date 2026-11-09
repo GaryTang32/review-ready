@@ -32,10 +32,14 @@ a branch you already have.
    diagnosis against the old code.
 3. **Prunes** what the problem does not need. Everything dropped is recorded,
    tagged as noise or as behaviour, never deleted silently.
-4. **Refactors** what stays — but only lines inside functions the branch
-   already changed.
+4. **Rewrites** what stays to the shortest code that does the job, starting
+   from the base file rather than trimming the agent's draft, and only inside
+   functions the branch already changed. **The series must keep at most half
+   the branch's reviewable lines**, per file and in total. The builder
+   measures this and refuses to land a series that misses it, unless each
+   file over the line carries a written reason.
 5. **Splits** it into a bisectable series, or into stacked PRs when the work is
-   genuinely large, and writes a real commit message for each patch.
+   still large after the rewrite, and writes a real commit message for each patch.
 6. **Reviews** it as a hostile stranger who has not seen your reasoning, and
    who must walk your failing case through the code by hand before an ACK.
 7. **Lands** it on your branch, once, with a one-command undo.
@@ -106,7 +110,7 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 22 whole situations in scratch repositories |
+| `build_series.py --self-test` | 25 whole situations in scratch repositories |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 31 |
@@ -115,8 +119,10 @@ absent and reports green.
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts
 it in a state that once went wrong, and asserts on the exit code, the output
-and the resulting git state. Every one of the 22 is the residue of a real
-defect found by review or by a run — none was written speculatively.
+and the resulting git state. 22 of the 25 are the residue of a real defect
+found by review or by a run. The other three pin the size gate: a verbatim
+series cannot land, a rewritten one can, and keeping more than half needs a
+stated reason.
 
 ## Documentation
 
@@ -131,6 +137,9 @@ Graded 21/21 and 26/26 on two fixtures with planted defects, and run against a
 7,760-line production tree. Honest limits, stated in full in the guide:
 
 - **Python only.** The taste rules generalise; the scripts do not.
+- **The size gate counts lines, not quality.** Halving a file by cramming
+  it passes the gate. The maintainer pass is what NAKs that ("clever"), and
+  `size_ok` exists for files that truly cannot shrink.
 - **Call resolution is a heuristic**, so every dead-code claim is conservative
   and the count of unresolved calls is printed beside it.
 - **It cannot judge whether your problem statement is right.** If the spec is
