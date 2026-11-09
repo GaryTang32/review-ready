@@ -531,14 +531,15 @@ def build(args, plan, plan_dir, resolve):
             if state == "timed out":
                 stop(f"\ncheck timed out after {timeout}s at patch {i}/{len(patches)} ({name}). Use the fast subset "
                      'the series touches as "check", raise "check_timeout", and run the full suite once at the end.')
-            if state == "failed":
-                stop(f"\ncheck FAILED at patch {i}/{len(patches)} ({name}): {subject}\n"
-                     + "\n".join(out.strip().splitlines()[-25:]))
+            # Vacuous before failed: unittest exits 5 on "NO TESTS RAN" since Python 3.12.
             counts = test_counts(out)
             if counts and (counts[0] == 0 or counts[0] == counts[1]) and not plan.get("allow_vacuous_check"):
                 stop(f"\ncheck is VACUOUS at patch {i}/{len(patches)} ({name}): {counts[0]} test(s) ran, {counts[1]} "
                      "skipped. Green with nothing run certifies nothing (tests that skip without a database, a "
                      'discovery path that finds no tests). Fix the command, or state why in "allow_vacuous_check".')
+            if state == "failed":
+                stop(f"\ncheck FAILED at patch {i}/{len(patches)} ({name}): {subject}\n"
+                     + "\n".join(out.strip().splitlines()[-25:]))
             status = f"ok ({counts[0]} tests" + (f", {counts[1]} skipped)" if counts and counts[1] else ")") \
                 if counts else "ok (test count not recognised)"
         rows.append((i, subject, files, add, dele, status))
