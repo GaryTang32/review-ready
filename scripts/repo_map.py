@@ -2,6 +2,18 @@
 """repo_map.py: read a whole Python repo and report how it is wired.
 
 usage: repo_map.py [--repo PATH] [--src DIR ...] [--md FILE] [--json FILE] [--top N]
+       repo_map.py --focus BASE..HEAD [--repo PATH] [--src DIR ...] [--md FILE] [--json FILE]
+       repo_map.py --self-test
+
+--focus maps only the code a branch changes and its neighbours, read at HEAD
+from git (never the working tree), against the fork point of BASE and HEAD:
+  act on these first  functions and classes the branch added that are used once
+                  (inline them), never called, called only by tests, or already
+                  in the tree under another name or the same shape; classes
+                  with one method
+  changed functions  for each: the call chain up from it, its callers with the
+                  line that calls it (what they already guarantee), what it
+                  calls, and the loops that hide a second loop
 
 Answers the questions a maintainer asks before touching an unfamiliar tree:
 what are the entry points, what calls what, what is public, what is dead,
@@ -35,11 +47,14 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +66,7 @@ except ImportError:  # degrade rather than die when a sibling module is missing
 
 LENGTH_BUDGET = 48
 DEPTH_BUDGET = 3
+INLINE_MAX = 12       # a single-use helper longer than this is a seam, not a layer: inlining it grows the caller
 # Files this interpreter could not parse. Every claim in the report is blind to
 # them, so the report says so instead of leaving it on stderr.
 UNPARSED = []
@@ -318,7 +334,8 @@ def build_graph(mods):
             # is taken as that definition; ambiguous leaves stay unresolved.
             if hit is None:
                 leaf = target.split(".")[-1]
-                cands = index.get(leaf, [])
+                # production code never calls into a test module: `fh.write()` is not tests' write()
+                cands = [c for c in index.get(leaf, []) if m.is_test or not mods[c[0]].is_test]
                 if len(cands) == 1:
                     hit = cands[0]
             if hit:
@@ -968,6 +985,299 @@ def render(r, top):
     return "\n".join(L)
 
 
+# ---- focus mode: the neighbourhood of a diff, read from git ---------------------------
+
+def export_commit(repo, ref, dest):
+    """Write the tracked files of `ref` under `dest`. The map reads a commit, never the checkout."""
+    tar = subprocess.run(["git", "-C", repo, "archive", "--format=tar", ref], capture_output=True)
+    if tar.returncode:
+        sys.exit(f"git archive {ref}: {tar.stderr.decode(errors='replace').strip()}")
+    with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as tf:
+        try:
+            tf.extractall(dest, filter="data")
+        except TypeError:                  # Python before 3.12 has no extraction filter
+            tf.extractall(dest)
+
+
+def changed_lines(repo, base, head):
+    """{rel: line numbers on the head side that the diff adds or changes} for .py files."""
+    diff = subprocess.run(["git", "-C", repo, "diff", "-U0", "--no-renames", base, head, "--", "*.py"],
+                          capture_output=True, text=True, check=True).stdout
+    out, rel = defaultdict(set), None
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            rel = line[6:] if line.startswith("+++ b/") else None
+        elif line.startswith("@@") and rel:
+            m = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            start, n = int(m.group(1)), int(m.group(2) or 1)
+            out[rel].update(range(start, start + n) if n else [start])   # n == 0: a deletion after `start`
+    return out
+
+
+def fingerprints(mods):
+    """{(rel, qual): shape hash} for every production function big enough to call a copy."""
+    out = {}
+    if not cm:
+        return out
+    for rel, m in mods.items():
+        if m.is_test:
+            continue
+        for node in ast.walk(m.tree):
+            if isinstance(node, FUNC):
+                fp = cm.fingerprint(node)
+                qual = next((q for q, d in m.defs.items() if d["line"] == node.lineno), None)
+                if fp and qual:
+                    out[(rel, qual)] = fp
+    return out
+
+
+def call_chain(key, callers_of, limit=8):
+    """Shortest path from a caller nothing calls (an entry point, module-level code) down to `key`."""
+    paths, seen = [[key]], {key}
+    for _ in range(limit):
+        nxt = []
+        for path in paths:
+            ups = callers_of.get(path[0], set())
+            if not ups:
+                return path
+            for c in sorted(ups, key=str):
+                if c not in seen:
+                    seen.add(c)
+                    nxt.append([c] + path)
+        if not nxt:
+            break
+        paths = nxt
+    return paths[0]
+
+
+def func_node(mod, d):
+    return next((n for n in ast.walk(mod.tree) if isinstance(n, FUNC) and n.lineno == d["line"]), None)
+
+
+def unplaced_calls(mod, qual, node, placed):
+    """Bare-name calls in `node` the resolver could not place. A method call or a builtin was never a
+    candidate for "unused" or "used once", and neither is a name the function binds itself."""
+    bound = {a.arg for a in ast.walk(node.args) if isinstance(a, ast.arg)}
+    bound |= {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+    bound |= {n.name for n in ast.walk(node) if isinstance(n, FUNC + (ast.ClassDef,)) and n is not node}
+    known = set(dir(__import__("builtins"))) | bound | set(mod.imports)
+    return sum(1 for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+               and c.func.id not in known and (mod.rel, qual, c.lineno) not in placed)
+
+
+def addition_findings(mods, old, old_fp, key, prod, tests, refs, ep_names):
+    """What to do about a function or class the branch added: [(group, finding)]."""
+    rel, qual = key
+    m, d = mods[rel], mods[rel].defs[qual]
+    name, where = d["name"], f"{rel}:{qual}"
+    if (name.startswith("__") or name == "main" or d["decorators"] or where in ep_names
+            or (m.all_exports is not None and name in m.all_exports)):
+        return []
+    out = []
+    if not prod and refs[name] == 0:
+        out.append(("test_only" if tests else "unused", dict(where=where, kind=d["kind"], line=d["line"],
+                                                             tests=len(tests))))
+    elif len(prod) == 1 and refs[name] <= 1 and d["length"] <= INLINE_MAX:
+        out.append(("inline", dict(where=where, kind=d["kind"], length=d["length"], site=f"{prod[0][0]}:{prod[0][2]}")))
+    if d["kind"] == "class":
+        methods = [q for q, x in m.defs.items() if x["cls"] == qual and not x["name"].startswith("__")]
+        if len(methods) <= 1:
+            out.append(("one_method", dict(where=where, methods=methods)))
+        return out
+    node = func_node(m, d)
+    fp = cm.fingerprint(node) if cm and node else None
+    twin = old_fp.get(fp)
+    same = [f"{r}:{q}" for r, om in old.items() if r != rel and not om.is_test
+            for q, x in om.defs.items() if x["name"] == name and x["kind"] != "class"]
+    if twin or same:
+        out.append(("dupes", dict(where=where, shape=f"{twin[0]}:{twin[1]}" if twin else None, name=same[:3])))
+    return out
+
+
+def index_edges(mods, edges):
+    """Call sites per callee (one per line), production callers per callee, callees per caller."""
+    sites, callers_of, callees = defaultdict(list), defaultdict(set), defaultdict(set)
+    for src_rel, caller, dst_rel, dst_qual, line in edges:
+        if (src_rel, line) not in {(r, n) for r, _c, n in sites[(dst_rel, dst_qual)]}:
+            sites[(dst_rel, dst_qual)].append((src_rel, caller, line))
+        if not mods[src_rel].is_test:
+            callers_of[(dst_rel, dst_qual)].add((src_rel, caller))
+        callees[(src_rel, caller)].add((dst_rel, dst_qual))
+    return sites, callers_of, callees
+
+
+def focus_map(repo, base, head, src_dirs):
+    fork = subprocess.run(["git", "-C", repo, "merge-base", base, head], capture_output=True, text=True)
+    if fork.returncode:
+        sys.exit(f"no merge base for {base} and {head}")
+    fork = fork.stdout.strip()
+    with tempfile.TemporaryDirectory() as th, tempfile.TemporaryDirectory() as tb:
+        export_commit(repo, head, th)
+        export_commit(repo, fork, tb)
+        mods, old = parse_repo(th, src_dirs), parse_repo(tb, src_dirs)
+        ep_names = {e[0] for e in entry_points(th, mods)}
+    lines = changed_lines(repo, fork, head)
+    edges, _unresolved = build_graph(mods)
+    is_new = lambda rel, qual: rel not in old or qual not in old[rel].defs   # noqa: E731
+    changed = [(rel, qual) for rel, ls in lines.items() if rel in mods and not mods[rel].is_test
+               for qual, d in mods[rel].defs.items()
+               if is_new(rel, qual) or (d["kind"] != "class" and any(d["line"] <= n <= d["end"] for n in ls))]
+
+    sites, callers_of, callees = index_edges(mods, edges)
+    old_fp = {fp: key for key, fp in fingerprints(old).items()}
+    refs = sum((m.refs for m in mods.values() if not m.is_test), Counter())
+    placed = {(src_rel, caller, line) for src_rel, caller, _r, _q, line in edges}
+
+    r = dict(fork=fork, head=head, changed=len(changed), inline=[], unused=[], test_only=[], dupes=[],
+             one_method=[], functions=[], unresolved=0, unparsed=list(UNPARSED))
+    for key in changed:
+        rel, qual = key
+        d = mods[rel].defs[qual]
+        prod = [c for c in sites[key] if not mods[c[0]].is_test]
+        tests = [c for c in sites[key] if mods[c[0]].is_test]
+        if is_new(rel, qual):
+            for group, finding in addition_findings(mods, old, old_fp, key, prod, tests, refs, ep_names):
+                r[group].append(finding)
+        node = func_node(mods[rel], d) if d["kind"] != "class" else None
+        if node is None:
+            continue
+        r["unresolved"] += unplaced_calls(mods[rel], qual, node, placed)
+        loops = cm.loop_costs(node) if cm else []
+        if not is_new(rel, qual):        # only the loops the branch wrote: pre-existing ones are not this PR's
+            loops = [c for c in loops if int(re.search(r"line (\d+)", c).group(1)) in lines[rel]]
+        src = {c[0]: mods[c[0]].src.splitlines() for c in prod}
+        r["functions"].append(dict(
+            where=f"{rel}:{qual}", length=d["length"], new=is_new(rel, qual), tests=len(tests), loops=loops,
+            chain=[f"{cr}:{cq or '<module>'}" for cr, cq in call_chain(key, callers_of)],
+            callers=[dict(at=f"{cr}:{n}", code=src[cr][n - 1].strip()[:100]) for cr, _q, n in prod],
+            calls=sorted(f"{cr}:{cq}" for cr, cq in callees[key])))
+    return r
+
+
+def render_focus(r):
+    L = [f"# Focus map: {r['fork'][:10]}..{r['head']}", "",
+         f"The {r['changed']} function(s) and class(es) this branch adds or changes, and their neighbours, read "
+         f"from git at {r['head']}, never the working tree. Calls are resolved by a heuristic: a claim that "
+         f"something is unused or used once is only as good as the resolver, and calls it could not place are "
+         f"counted, not dropped: {r['unresolved']} plain-name call(s) in the changed code it could not "
+         f"place.", ""]
+    if r["unparsed"]:
+        L += ["**Could not parse, so blind to:** " + ", ".join(f"`{u[0]}`" for u in r["unparsed"]), ""]
+    L += ["## Act on these first", ""]
+    groups = [
+        ("Added and used once: inline at the caller (minimal-code.md move 1)", r["inline"],
+         lambda x: f"`{x['where']}` ({x['kind']}, {x['length']} lines), called once, at `{x['site']}`"),
+        ("Classes with at most one method: a function (move 1)", r["one_method"],
+         lambda x: f"`{x['where']}`" + (f": only `{x['methods'][0]}`" if x["methods"] else ": no methods")),
+        ("Added and never called: prune it, or it lands with its first caller", r["unused"],
+         lambda x: f"`{x['where']}` ({x['kind']}, line {x['line']})"),
+        ("Added and called only by tests: dead in production", r["test_only"],
+         lambda x: f"`{x['where']}` ({x['tests']} test call(s))"),
+        ("Added, and the tree already has it: reuse the original (move 4)", r["dupes"],
+         lambda x: f"`{x['where']}`" + (f": same shape as `{x['shape']}`" if x["shape"] else "")
+                   + (f": same name as {', '.join(f'`{n}`' for n in x['name'])}" if x["name"] else "")),
+    ]
+    for title, items, fmt in groups:
+        if items:
+            L += [f"### {title}", ""] + [f"- {fmt(x)}" for x in items] + [""]
+    if not any(items for _t, items, _f in groups):
+        L += ["Nothing: no single-use, unused, test-only or duplicate additions were found.", ""]
+    L += ["## Changed functions", "",
+          "Callers show what each call site already guarantees, so a check inside the function that repeats it "
+          "can go (move 2). Loops are listed only where one hides a second loop; change complexity only where "
+          "the data is large and the change is measured (algorithm-smells.md).", ""]
+    for f in r["functions"]:
+        L += [f"### `{f['where']}` ({'new' if f['new'] else 'changed'}, {f['length']} lines)", ""]
+        if len(f["chain"]) > 1:
+            L.append("- Chain: " + " -> ".join(f"`{c}`" for c in f["chain"]))
+        L.append(f"- Callers: {len(f['callers'])} in code, {f['tests']} in tests")
+        L += [f"  - `{c['at']}`: `{c['code']}`" for c in f["callers"][:6]]
+        if len(f["callers"]) > 6:
+            L.append(f"  - and {len(f['callers']) - 6} more")
+        if f["calls"]:
+            L.append("- Calls: " + ", ".join(f"`{c}`" for c in f["calls"][:10]))
+        L += [f"- Loop: {c}" for c in f["loops"][:3]]
+        if len(f["loops"]) > 3:
+            L.append(f"- and {len(f['loops']) - 3} more loop(s) the branch wrote")
+        L.append("")
+    return "\n".join(L)
+
+
+SELF_TEST_BASE = {
+    "pkg/__init__.py": "",
+    "pkg/cli.py": "from pkg.pipeline import run\n\n\ndef main():\n    run('in.csv')\n\n\n"
+                  "if __name__ == '__main__':\n    main()\n",
+    "pkg/pipeline.py": "from pkg.loader import load\n\n\ndef run(path):\n    return len(load(path))\n",
+    "pkg/loader.py": "def load(path):\n    return [line for line in open(path)]\n",
+    "pkg/util.py": "def unique(items):\n    seen = set()\n    out = []\n    for item in items:\n"
+                   "        if item not in seen:\n            seen.add(item)\n            out.append(item)\n"
+                   "    return out\n",
+    "tests/__init__.py": "",
+    "tests/test_loader.py": "from pkg.loader import load\n\n\ndef test_load():\n    assert load(__file__)\n",
+}
+SELF_TEST_BRANCH = {
+    "pkg/loader.py": "from pkg.fmt import Formatter\n\n\ndef load(path):\n    rows = [line for line in open(path)]\n"
+                     "    return _strip(rows)\n\n\ndef _strip(rows):\n    return [Formatter().fmt(r) for r in rows]\n\n\n"
+                     "def dedupe(rows):\n    seen = set()\n    kept = []\n    for row in rows:\n"
+                     "        if row not in seen:\n            seen.add(row)\n            kept.append(row)\n"
+                     "    return kept\n\n\ndef never_called():\n    return 1\n\n\ndef only_tested():\n    return 2\n",
+    "pkg/fmt.py": "class Formatter:\n    def fmt(self, row):\n        return row.strip()\n",
+    "tests/test_loader.py": "from pkg.loader import load, only_tested\n\n\ndef test_load():\n    assert load(__file__)\n"
+                            "\n\ndef test_only():\n    assert only_tested() == 2\n",
+}
+
+
+def self_test():
+    """--focus against a scratch repo with one planted case per finding."""
+    env = dict(os.environ, GIT_AUTHOR_NAME="T", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="T",
+               GIT_COMMITTER_EMAIL="t@example.com", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+
+    def git(*a):
+        subprocess.run(["git", "-C", r, *a], check=True, capture_output=True, env=env)
+
+    def write(files):
+        for rel, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(r, rel)), exist_ok=True)
+            with open(os.path.join(r, rel), "w") as fh:
+                fh.write(text)
+
+    with tempfile.TemporaryDirectory() as r:
+        git("init", "-q", "-b", "main")
+        write(SELF_TEST_BASE); git("add", "-A"); git("commit", "-qm", "base")
+        git("checkout", "-qb", "feature")
+        write(SELF_TEST_BRANCH); git("add", "-A"); git("commit", "-qm", "feature")
+        git("checkout", "-q", "main")
+        write({"pkg/loader.py": "def checkout_only():\n    return 0\n"})      # uncommitted, on another branch
+        status = subprocess.run(["git", "-C", r, "status", "--porcelain"], capture_output=True, text=True).stdout
+        text = render_focus(focus_map(r, "main", "feature", []))
+        after = subprocess.run(["git", "-C", r, "status", "--porcelain"], capture_output=True, text=True).stdout
+    checks = [
+        ("a helper used once is an inline candidate", "`pkg/loader.py:_strip` (function, 2 lines), called once"),
+        ("a class with one method is named", "`pkg/fmt.py:Formatter`: only `Formatter.fmt`"),
+        ("an addition nothing calls is named", "`pkg/loader.py:never_called`"),
+        ("an addition only tests call is named", "`pkg/loader.py:only_tested` (1 test call(s))"),
+        ("a copy of an existing function is found by shape", "`pkg/loader.py:dedupe`: same shape as `pkg/util.py:unique`"),
+        ("the chain runs from the entry point down",
+         "`pkg/cli.py:main` -> `pkg/pipeline.py:run` -> `pkg/loader.py:load`"),
+        ("a caller is shown with the line that calls", "`pkg/pipeline.py:5`: `return len(load(path))`"),
+        ("test callers are counted apart", "Callers: 1 in code, 1 in tests"),
+    ]
+    failed = 0
+    for name, needle in checks:
+        ok = needle in text
+        failed += not ok
+        print(("ok   " if ok else "FAIL ") + name)
+    for name, ok in [("the checkout is never read", "checkout_only" not in text),
+                     ("an unchanged function is not listed", "### `pkg/pipeline.py:run`" not in text),
+                     ("nothing in the repo is written", status == after)]:
+        failed += not ok
+        print(("ok   " if ok else "FAIL ") + name)
+    if failed:
+        print(text)
+    print(f"{len(checks) + 3} cases, {failed} failing")
+    return 1 if failed else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", default=".")
@@ -976,7 +1286,11 @@ def main():
     ap.add_argument("--md")
     ap.add_argument("--json")
     ap.add_argument("--top", type=int, default=20)
+    ap.add_argument("--focus", metavar="BASE..HEAD", help="map only what the branch changes, read from git")
+    ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
+    if args.self_test:
+        sys.exit(self_test())
     root = os.path.abspath(args.repo)
     # --src is a DIRECTORY relative to the repo (src/acme), not a package name. A wrong
     # one used to read as an empty, clean tree.
@@ -984,10 +1298,17 @@ def main():
         if not os.path.isdir(os.path.join(root, d)):
             sys.exit(f"--src {d!r} is not a directory under {root}: pass the package DIRECTORY (src/acme), "
                      "and pass the tests too (--src tests), or tested code reads as dead and untested")
-    r = analyse_repo(root, args.src, args.top)
-    if r is None:
-        sys.exit("no Python files found")
-    text = render(r, args.top)
+    if args.focus:
+        base, sep, head = args.focus.partition("..")
+        if not sep or not base or not head:
+            sys.exit("--focus takes BASE..HEAD, for example main..feature/x")
+        r = focus_map(root, base, head, args.src)
+        text = render_focus(r)
+    else:
+        r = analyse_repo(root, args.src, args.top)
+        if r is None:
+            sys.exit("no Python files found")
+        text = render(r, args.top)
     if args.src and not any(re.search(r"(^|/)tests?(/|$)", d) for d in args.src):
         text = ("> **No test directory was given with --src.** Everything below about \"untested\", \"no test reaches "
                 "it\" and \"possibly dead\" is blind to the tests. Rerun with `--src <pkg dir> --src tests`.\n\n") + text
