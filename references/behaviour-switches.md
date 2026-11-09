@@ -117,6 +117,12 @@ format, and when?
 
 ## 4. Dark launch: the order for any patch that flips a switch
 
+**When it applies:** when the change alters behaviour that existing callers
+already run, and someone depends on the old behaviour. A new capability
+that no existing caller reaches lands without a guard, since nothing is
+switched on until its first caller arrives. A bug fix gets none either. A
+guard nobody needs is a knob nobody asked for, and it doubles the tests.
+
 A feature that defaults to n is reviewed for what it *adds*, because it
 changes nothing. Five patches at most, in this order:
 

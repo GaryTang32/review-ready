@@ -13,6 +13,11 @@ Series:
   2/N <subject> (+a/-d): <one clause>
   ...
 
+Size:
+  <branch reviewable lines> -> <series reviewable lines> (<pct>%), from size.md.
+  Kept whole, with the reason (only files in size_ok):
+  - <path>: <why it could not shrink>
+
 Testing:
   <command>; passes at every patch, <N> tests, <k> skipped. <new test> fails
   before patch k and passes after it.

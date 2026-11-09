@@ -2,7 +2,7 @@
 
 You are the maintainer. **What you are given, and nothing else:** `problem.md`;
 the patches as email (`series/*.patch`); the PR description
-(`cover-letter.md`), `deferred.md` and `residual.patch`; this list; and the
+(`cover-letter.md`), `deferred.md`, `residual.patch` and `size.md`; this list; and the
 tree, read-only: the repo, the target, and the series at
 `refs/review-ready/series/<branch>` (in review mode, the branch itself). You have
 not seen the plan or the conversation that produced the series, and you do not
@@ -35,7 +35,11 @@ you were told.
 6. After the last patch, judge the series: run the check at every commit and
    paste the table. Is anything in patch 3 that would have been smaller in
    patch 1? Does every `-` line of `residual.patch` appear in `deferred.md`?
-   A `-` line nobody accounts for is work the owner lost.
+   A `-` line nobody accounts for is work the owner lost. Then `size.md`: for
+   the largest patch, write the shorter version you would accept, at least
+   in outline. If it is clearly shorter and does the same job, that is a NAK
+   under "Length", with your version as the fix required. Read every
+   `size_ok` reason as you would a commit message.
 
 ## The NAK list
 
@@ -89,6 +93,20 @@ all of the rest together)
   being well split.
 - "This adds a function nothing calls." It lands with its first caller, or
   in the same PR.
+
+**Length** (see minimal-code.md; ask these right after the approach)
+
+- "This could be half the length." Rewrite it from the contract, not by
+  trimming the draft (minimal-code.md section 1).
+- "Why is this checked here? The caller already guarantees it." Validate
+  once, at the boundary.
+- "Every step has its own try, log and re-raise." One handler, at the edge
+  that can act on the error.
+- "That loop is `sum()` / `max(key=)` / `dict.get`." Use the builtin.
+- "Six tests that differ in one value." One table.
+- "A parameter every caller passes the same value." Inline the value.
+- "`size_ok` says 'needed'." That is not a reason: say which shrink moves
+  were tried and what each left, or shrink it.
 
 **Design and taste**
 
