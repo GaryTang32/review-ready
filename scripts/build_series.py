@@ -37,6 +37,11 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
                                        # silence the "a later overlay drops what an earlier patch added"
                                        # warning for one path, with the reason
                                        # files the user's branch never touched; each needs its reason
+  "shrink": 0.5,                       # the series keeps at most this share of the branch's reviewable lines,
+                                       # in total and per file (see "The size gate"); above 0.5 needs
+  "shrink_reason": "<reason>",         # this, which also goes in the PR description
+  "size_ok": {"acme/schema.py": "generated from schema.sql; reviewed there"},
+                                       # files exempt from the size gate, each with its reason
   "allow_vacuous_check": "<reason>",   # accept a check that ran zero tests, or skipped them all
   "no_check_reason": "<reason>",       # a plan with no `check`: say why, or the build refuses
   "patches": [
@@ -88,6 +93,16 @@ Gates the builder applies, because each was once a false pass:
   * a later overlay that drops lines an earlier patch added is reported;
   * the original branch's own tests are run against the rebuilt code, and each
     failure must be a deferred feature's test or a change made on purpose.
+  * the series keeps at most `shrink` of the branch (the size gate, below).
+
+The size gate. A series that reproduces the branch line for line has been
+split, not made reviewable. After the build, the lines changed against the fork
+point in source, tests, config and docs, ignoring whitespace and blank lines,
+are compared file by file with the user's branch: the series may keep at most
+`shrink` of them in total and in every file the branch changed by 20 lines or
+more, unless the file is in `size_ok`. A branch under 100 such lines is not
+gated. The table goes to size.md; a failed gate fails the build and --land
+refuses the series. Stacking does not help: the gate measures the whole series.
 
 The residual is written next to the plan as residual.patch, as
 `git diff <original> <series>`: a `-` line is something the user's branch had
@@ -105,6 +120,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from audit_diff import classify  # noqa: E402  one definition of "reviewable" for the audit and the gate
+
+SHRINK = 0.5          # the series keeps at most this share of the branch's reviewable lines
+SHRINK_FLOOR = 100    # a branch with fewer reviewable lines is not gated: a 30-line fix is not halved
+FILE_FLOOR = 20       # nor is one file the branch changed by fewer lines
+REVIEWED = ("source", "test", "config", "docs", "other")
 
 TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$")
 # Files an owner expects to find in their working directory even when the series
@@ -248,6 +271,60 @@ def check_message(path, idx, sign_off):
     return subject
 
 
+def reviewable_lines(top, a, b):
+    """{path: lines changed} for the files a reader reviews by eye.
+
+    Whitespace and blank lines are ignored on both sides, so pruning churn
+    alone cannot pass the size gate; only less code can.
+    """
+    out = {}
+    for line in git(top, "diff", "--numstat", "--no-renames", "-w", "--ignore-blank-lines", a, b, "--").splitlines():
+        add, dele, path = line.split("\t", 2)
+        if add != "-" and classify(path) in REVIEWED:
+            out[path] = int(add) + int(dele)
+    return out
+
+
+def size_gate(top, base, original, series, plan):
+    """The series against the branch, file by file and in total. Returns (passed, markdown)."""
+    shrink, size_ok, scope_ok = plan.get("shrink", SHRINK), plan.get("size_ok") or {}, plan.get("scope_ok") or {}
+    before, after = reviewable_lines(top, base, original), reviewable_lines(top, base, series)
+    total_b = sum(n for p, n in before.items() if p not in size_ok)
+    total_a = sum(n for p, n in after.items() if p not in size_ok)
+    gated = total_b >= SHRINK_FLOOR
+    rows, over = [], []
+    for path in sorted(set(before) | set(after), key=lambda p: (-before.get(p, 0), p)):
+        b, a = before.get(path, 0), after.get(path, 0)
+        if path in size_ok:
+            verdict = f"kept: {size_ok[path]}"
+        elif not b:
+            verdict = "added by the series" + (f": {scope_ok[path]}" if path in scope_ok else "")
+        elif gated and b >= FILE_FLOOR and a > shrink * b:
+            verdict = f"OVER: at most {int(shrink * b)}"
+            over.append(path)
+        else:
+            verdict = "ok"
+        rows.append(f"| `{path}` | {b} | {a} | {verdict} |")
+    pct = f"{100 * total_a // total_b}%" if total_b else "-"
+    if not gated:
+        result = f"not gated: the branch has under {SHRINK_FLOOR} reviewable lines outside `size_ok`"
+    elif total_a > shrink * total_b or over:
+        result = "FAILED"
+    else:
+        result = "passed"
+    md = ["# Size: the series against the branch", "",
+          f"Lines changed against the fork point, ignoring whitespace and blank lines, in source, tests, config "
+          f"and docs. The series keeps at most {shrink:.0%} (`shrink`) of the branch: in total, and in every file "
+          f"the branch changed by {FILE_FLOOR} lines or more. A file listed in `size_ok` is exempt, with its reason.",
+          "", "| file | branch | series | verdict |", "|---|---:|---:|---|", *rows, "",
+          f"Total outside `size_ok`: {total_b} -> {total_a} ({pct}). Gate: **{result}**."]
+    if result == "FAILED":
+        md += ["", "Rewrite each OVER file smaller (SKILL.md step 3, references/minimal-code.md). A file that "
+               "truly cannot shrink goes in the plan's `size_ok` with the reason a reviewer would accept, and the "
+               "reason goes in the PR description. Splitting into a stack does not change the total."]
+    return result != "FAILED", "\n".join(md) + "\n"
+
+
 def fresh_target(top, name):
     """Refuse a local branch that is behind its remote: `git fetch` never moves it."""
     if not name or not ref_exists(top, f"refs/heads/{name}"):
@@ -334,6 +411,16 @@ def build(args, plan, plan_dir, resolve):
     ends = [s.get("through") for s in stack]
     if stack and (ends != sorted(set(ends)) or not all(isinstance(e, int) and 1 <= e < len(patches) for e in ends)):
         sys.exit('"stack": each "through" is a patch number, ascending, below the last patch (the source branch is the top)')
+    shrink = plan.get("shrink", SHRINK)
+    if isinstance(shrink, bool) or not isinstance(shrink, (int, float)) or not 0 < shrink <= 1:
+        sys.exit(f'"shrink" is the share of the branch the series may keep: a number above 0 and at most 1, not {shrink!r}')
+    if shrink > SHRINK and not plan.get("shrink_reason"):
+        sys.exit(f'"shrink" {shrink} keeps more than the default {SHRINK}: say why in "shrink_reason", which also '
+                 "goes in the PR description")
+    for key in ("size_ok", "scope_ok", "overlay_ok"):
+        blank = [k for k, v in (plan.get(key) or {}).items() if not str(v).strip()]
+        if blank:
+            sys.exit(f'"{key}" needs a reason for every path; none given for: {", ".join(blank)}')
 
     for name in (onto, base):
         fresh_target(top, name)
@@ -550,7 +637,7 @@ def build(args, plan, plan_dir, resolve):
     series_tip = sha(wt, "HEAD")
     shas = git(wt, "rev-list", "--reverse", f"{base}..HEAD").split()
 
-    residual = ""
+    residual, size_passed, size_md = "", True, ""
     if files_from:
         # Scope: a pre-PR pass cleans what the branch wrote. A file the branch never
         # touched is someone else's code, and the owner will be asked to defend it.
@@ -566,6 +653,9 @@ def build(args, plan, plan_dir, resolve):
         residual_stat = git(top, "diff", "--stat", "--summary", files_from, series_tip)
         with open(os.path.join(plan_dir, "residual.patch"), "w") as fh:
             fh.write(residual)
+        size_passed, size_md = size_gate(top, base, files_from, series_tip, plan)
+        with open(os.path.join(plan_dir, "size.md"), "w") as fh:
+            fh.write(size_md)
 
         # The per-patch check ran the PRUNED suite. Run the tests the user's branch
         # came with against the rebuilt code: that is the only place a behaviour that
@@ -639,9 +729,17 @@ def build(args, plan, plan_dir, resolve):
             print(residual_stat.rstrip())
         else:
             print("\nresidual: none (the series reproduces the branch exactly)")
+        with open(os.path.join(plan_dir, "size-gate.json"), "w") as fh:
+            json.dump({"series": series_tip, "passed": size_passed}, fh)
+        print("\n" + "\n".join(l for l in size_md.splitlines() if "| OVER" in l or l.startswith("Total outside")))
         print(f"\n{source} has NOT moved. The series is at refs/review-ready/series/{source}: review it there "
-              f"(git log {landed_on}..refs/review-ready/series/{source}), and when the verdict is ACK:\n"
-              f"  python3 {os.path.abspath(__file__)} {os.path.abspath(args.plan)} --land")
+              f"(git log {landed_on}..refs/review-ready/series/{source})" + (
+                  f", and when the verdict is ACK:\n  python3 {os.path.abspath(__file__)} {os.path.abspath(args.plan)} "
+                  "--land" if size_passed else
+                  f".\nSIZE GATE FAILED: the series keeps too much of the branch to land. Full table in "
+                  f"{os.path.join(plan_dir, 'size.md')}"))
+        if not size_passed:
+            sys.exit(1)
     else:
         if ref_exists(top, f"refs/heads/{branch}"):
             git(top, "update-ref", f"refs/review-ready/replaced/{branch}", sha(top, f"refs/heads/{branch}"))
@@ -668,6 +766,16 @@ def land(args, plan, plan_dir, resolve):
     if sha(top, built_from) != sha(top, original):
         sys.exit("the recorded series was built from an older original; rebuild before landing")
     new_tip = sha(top, series)
+    try:
+        with open(os.path.join(plan_dir, "size-gate.json")) as fh:
+            gate = json.load(fh)
+    except (OSError, ValueError):
+        gate = {}
+    if gate.get("series") != new_tip:
+        sys.exit("no size-gate verdict for this series (size-gate.json is missing or from another build): rebuild")
+    if not gate.get("passed"):
+        sys.exit(f"the series failed the size gate; see {os.path.join(plan_dir, 'size.md')}. Rewrite the OVER files "
+                 'smaller, or give each a reason in "size_ok", then rebuild.')
 
     current = git(top, "rev-parse", "--abbrev-ref", "HEAD").strip()
     for block in git(top, "worktree", "list", "--porcelain").split("\n\n"):

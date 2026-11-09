@@ -60,8 +60,8 @@ from collections import defaultdict
 
 LENGTH_BUDGET = 48
 DEPTH_BUDGET = 3
-PATCH_BUDGET = 300
-PR_BUDGET = 400        # reviewable lines a reviewer finishes in one sitting
+PATCH_BUDGET = 150
+PR_BUDGET = 200        # reviewable lines a reviewer finishes in one sitting
 PR_PATCHES = 8
 
 GENERATED_FILES = {
@@ -751,10 +751,10 @@ def audit(repo, base, head, check=None, tip_only=False, timeout=900, import_chec
                  if p_ in brought and not b_ and classify(p_) in ("source", "test", "config", "docs", "other"))
     if reviewable > PR_BUDGET:
         hints.append(f"{reviewable} reviewable lines is more than one sitting ({PR_BUDGET}): {in_new} in new files, "
-                     f"{reviewable - in_new} in edits to existing code. Edits to code others depend on keep the small "
-                     f"budget. New self-contained files with their tests, nothing importing them until the last patch, "
-                     f"may run to about a thousand lines. Past that, cut stacked PRs (plan field \"stack\"), and "
-                     f"never prune needed work to hit a number.")
+                     f"{reviewable - in_new} in edits to existing code. Rewrite before you split: AI-written code is "
+                     f"usually two to four times the length the problem needs, and the series may keep at most half "
+                     f"of it (the builder's size gate). Only what is still over budget after the rewrite becomes "
+                     f"stacked PRs (plan field \"stack\"); a stack does not shrink the total.")
     if noise:
         hints.append(f"{noise} lines in generated files, notebooks, data or binaries: none of it is reviewed by eye. A data "
                      "file the code reads is a behaviour switch and gets its own patch (behaviour-switches.md); the rest "
