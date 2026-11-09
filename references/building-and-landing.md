@@ -5,7 +5,7 @@ carry it out safely: the work directory, where the tests run, where your
 edits live, the plan, the build and what it prints, the maintainer pass,
 landing, and the hand-back. Read the section a step names when you reach it.
 
-Contents: 1 the ground, 2 where the tests run, 3 where your edits live,
+Contents: 1 the ground and the focus map, 2 where the tests run, 3 where your edits live,
 4 the plan, 5 the build and what to read in it, 6 the maintainer pass,
 7 run, defend, land, 8 the hand-back.
 
@@ -57,6 +57,23 @@ Everything else it reports is listed at the top of the script, and every
 finding names the reference that says what to do about it. `--check-tip`
 runs the tests once, at the head, as the baseline. `--check` replays them at
 every commit, which is review mode's question, not this one's.
+
+**The focus map** comes next, before any of the diff is read:
+
+```bash
+python3 $S/repo_map.py --repo <repo> --focus <target>..<head> --md $W/focus.md
+```
+
+It exports the fork point and the head with `git archive` into temporary
+directories and reads those, so the checkout is never read and nothing in
+the repo is written. Pass `--src <pkg dir> --src tests` to limit it to the
+package and its tests. Call resolution is the same heuristic as the full map:
+a name defined once in the tree is taken to be that definition, so a claim
+that something is used once or never is checked by reading before it is
+acted on. The report says how many plain-name calls in the changed code it
+could not place. Run it again at the series head after the rewrite, if you
+want to see what the series still adds and whether anything single-use
+remains.
 
 ## 2. Where the tests run
 

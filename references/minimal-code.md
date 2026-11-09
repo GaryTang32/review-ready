@@ -13,7 +13,12 @@ for length, 5 the size gate and `size_ok`, 6 a worked example.
 ## 1. The procedure
 
 Work file by file, largest first (the audit's size table, or `size.md` from
-the last build).
+the last build), with `focus.md` open (SKILL.md step 0). For each changed
+function it gives the call chain, every caller with the line that calls it,
+what the function calls, and which additions are used once, never called or
+already in the tree. Read the code with those relations in hand, not file by
+file in isolation: most of the moves below need to know who else touches the
+code.
 
 1. **Write the contract** for the file's changed code in five lines at most:
    what each changed function takes, returns and raises, and which surviving
@@ -44,12 +49,15 @@ and the size gate's line count is no defence.
 
 In rough order of how much they usually save in agent code.
 
-1. **Inline the single-use layer.** A helper called once, a class with one
+1. **Inline the single-use layer** (`focus.md`: "used once", "classes with
+   at most one method"). A helper called once, a class with one
    method, a wrapper that forwards, a base class with one subclass, a
    factory for one product, a constants module for one constant. Inline it
    at its caller; it can come back at the third user.
 2. **Validate once, at the boundary.** Agent code re-checks types, `None`,
-   emptiness and ranges in every function along the call chain. Check where
+   emptiness and ranges in every function along the call chain. The focus
+   map shows each caller's line: what every caller already passes needs no
+   check inside. Check where
    the data enters (user input, file, network, the public function) and
    trust it below. A check for a state the caller cannot produce is deleted,
    not deferred.
@@ -60,8 +68,8 @@ In rough order of how much they usually save in agent code.
 4. **Use what the language and the tree already have.** A hand-written loop
    that is `sum`, `any`, `all`, `max(key=)`, `sorted(key=)`, `dict.get`,
    `setdefault`, `Counter`, `defaultdict`, `itertools`, `pathlib`, `str.join`,
-   or a pandas method. A function the tree already defines (the audit lists
-   duplicates). The shortest code is the code you call.
+   or a pandas method. A function the tree already defines (`focus.md`:
+   "the tree already has it"). The shortest code is the code you call.
 5. **Data instead of branches.** An `if/elif` chain mapping a value to a
    value, or parallel branches differing in one constant, becomes a dict or a
    tuple of rows and one lookup.
@@ -80,6 +88,28 @@ In rough order of how much they usually save in agent code.
     line, no history. Type hints on the public surface the change adds.
 11. **Logging that nobody reads.** "Entering function", "processing row",
     "done" are deleted. A log line stays when an operator would act on it.
+
+### Algorithms and patterns
+
+**A better algorithm is a shrink move only where the cost is real.** The
+focus map lists the loops the branch wrote that hide a second loop, and the
+callers show how often the function runs. Where n is large (rows of a
+table, files of a repo, a hot path with many callers), the standard
+replacements in algorithm-smells.md and clean-code-examples.md are usually
+shorter as well as faster: a set for membership, a dict for a join, `bisect`,
+`heapq`, two pointers, a window kept rather than recomputed. Where n is a
+few dozen, brute force is shorter, obvious and right; a clever algorithm
+there adds code and risk and saves nothing. A rewrite for speed is measured
+first and is its own patch.
+
+**A design pattern is not a shrink move.** Strategy, factory, repository,
+observer, an abstract base class, dependency injection for one
+implementation: each adds a layer, and layers are what make agent code long.
+A pattern earns its place when three real cases already exist, not for the
+one in this branch. The structural ideas that do shorten code are already
+moves above: data instead of branches (move 5), a representation that
+removes the special case (maintainer-rules.md section 4), and one function
+that does real work rather than three that forward to each other (move 1).
 
 ## 3. Tests
 

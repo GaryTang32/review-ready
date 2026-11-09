@@ -2,7 +2,7 @@
 
 You are the maintainer. **What you are given, and nothing else:** `problem.md`;
 the patches as email (`series/*.patch`); the PR description
-(`cover-letter.md`), `deferred.md`, `residual.patch` and `size.md`; this list; and the
+(`cover-letter.md`), `deferred.md`, `residual.patch`, `size.md` and `focus.md`; this list; and the
 tree, read-only: the repo, the target, and the series at
 `refs/review-ready/series/<branch>` (in review mode, the branch itself). You have
 not seen the plan or the conversation that produced the series, and you do not
@@ -105,6 +105,11 @@ all of the rest together)
 - "That loop is `sum()` / `max(key=)` / `dict.get`." Use the builtin.
 - "Six tests that differ in one value." One table.
 - "A parameter every caller passes the same value." Inline the value.
+- "The focus map lists this as used once / never called / already in the
+  tree." Inline it, cut it, or reuse the original, or say in the message
+  why the map is wrong here.
+- "This adds a pattern (a strategy, a factory, a repository, a base class)
+  for one case." Write the case.
 - "`size_ok` says 'needed'." That is not a reason: say which shrink moves
   were tried and what each left, or shrink it.
 

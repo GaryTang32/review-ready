@@ -27,7 +27,11 @@ a branch you already have.
 
 1. **Audits** the branch: size against noise, behaviour switches, security and
    data-correctness risks, public signatures that changed, new code that
-   duplicates the tree, comments that cost more than they pay for.
+   duplicates the tree, comments that cost more than they pay for. Then it
+   **maps the code around the diff**: for each changed function, its call
+   chain, its callers and what it calls, plus the additions used once, never
+   called or already in the tree. The rewrite works from those relations
+   rather than reading files one at a time.
 2. **States the problem** the branch solves, in one paragraph, and checks the
    diagnosis against the old code.
 3. **Prunes** what the problem does not need. Everything dropped is recorded,
@@ -115,6 +119,7 @@ absent and reports green.
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 31 |
 | `comment_audit.py --self-test` | 17, eight of which must find nothing |
+| `repo_map.py --self-test` | 11, the focus map against a scratch repo with one planted case per finding |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts
