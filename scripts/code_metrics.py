@@ -43,6 +43,7 @@ DUP_MIN_STATEMENTS = 5
 SHINGLE = 5              # tokens per shingle
 COPY_MIN_LINES = 8       # shorter functions look alike by accident
 COPY_MIN_SHINGLES = 30
+COPY_EXACT = 0.95        # at or above this a copy is the same function; below, it was edited after pasting
 COPY_SIMILARITY = 0.8    # three hand-edited copies of one function scored 0.82 to 0.91; parallel but
                          # distinct functions (two format handlers, two test cases) scored 0.61 to 0.75
 SKETCH = 16              # smallest shingle hashes kept per function to find candidate pairs
@@ -244,23 +245,24 @@ def near_copies(items):
 
 
 def copy_clusters(pairs):
-    """Group near_copies() pairs into clusters: [(lowest similarity in the cluster, sorted members)]."""
-    parent = {}
+    """Group near_copies() pairs into clusters: [(lowest similarity to the centre, sorted members)].
 
-    def find(x):
-        while parent.setdefault(x, x) != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for _sim, a, b in pairs:
-        parent[find(a)] = find(b)
-    groups, low = defaultdict(list), {}
-    for key in parent:
-        groups[find(key)].append(key)
-    for sim, a, _b in pairs:
-        low[find(a)] = min(sim, low.get(find(a), 1.0))
-    return sorted((low[root], sorted(members)) for root, members in groups.items())
+    Every member is a copy of one centre function, the one with the most copies. Joining any two
+    linked functions instead chains a to b to c to d, puts a and d in one cluster though they are
+    not alike, and overstates what merging would save.
+    """
+    near = defaultdict(dict)
+    for sim, a, b in pairs:
+        near[a][b] = near[b][a] = sim
+    out, left = [], set(near)
+    while left:
+        centre = max(sorted(left), key=lambda k: len(near[k].keys() & left))
+        members = (near[centre].keys() & left) | {centre}
+        if len(members) == 1:
+            break                      # nothing left is a copy of anything else left
+        out.append((min(near[centre][m] for m in members if m != centre), sorted(members)))
+        left -= members
+    return sorted(out)
 
 
 ASSERT_CALL = re.compile(r"^(assert\w*|fail|raises|warns|assert_\w+|approx)$")
@@ -562,6 +564,12 @@ def self_test():
     check("a function too small to be a copy has no shingles", copy_shingles(flat.splitlines(), _fn(flat)) is None)
     check("a method tokenizes like a function", len(shingles(textwrap.indent(depth_a, "    "))) == len(sets["a"]))
     check("copies cluster", copy_clusters(near_copies(sets)) == [(near_copies(sets)[0][0], ["a", "b"])])
+    chain = [(0.85, "a", "b"), (0.85, "b", "c"), (0.85, "c", "d")]
+    check("a chain a-b-c-d is not one cluster: a and d are not alike",
+          copy_clusters(chain) == [(0.85, ["a", "b", "c"])])
+    star = [(0.9, "x", "hub"), (0.82, "hub", "y"), (1.0, "hub", "z")]
+    check("copies of one function are one cluster, scored by the least alike",
+          copy_clusters(star) == [(0.82, ["hub", "x", "y", "z"])])
     print(f"{failed} failing")
     raise SystemExit(1 if failed else 0)
 

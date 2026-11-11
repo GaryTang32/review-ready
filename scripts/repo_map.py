@@ -910,6 +910,7 @@ def analyse_repo(root, src_dirs, top):
     dup_names = {n: sorted(set(v)) for n, v in same_name.items() if len(set(v)) > 1}
     # Copies by similarity: the shape hash only finds bodies that are identical once renamed.
     copies = [dict(similarity=low, members=[f"{r_}:{n_} (line {l_})" for r_, n_, l_ in members],
+                   exact=low >= cm.COPY_EXACT,
                    removable=sum(lengths[k] for k in members) - max(lengths[k] for k in members))
               for low, members in (cm.copy_clusters(cm.near_copies(shingled)) if cm else [])]
     copies.sort(key=lambda c: -c["removable"])
@@ -1010,6 +1011,7 @@ def analyse_repo(root, src_dirs, top):
                 weak_tests=weak_tests[:top], lazy_imports=lazy_imports[:top],
                 dup_names=dup_names, dup_shapes=dup_shapes[:top], dup_tests=dup_tests[:top],
                 copies=copies[:top], copies_removable=sum(c["removable"] for c in copies),
+                copies_exact=sum(c["removable"] for c in copies if c["exact"]),
                 rewrite_order=rewrite_order(ig, sorted(prod)),
                 risks={f"{g}|{n}": v for (g, n), v in risks.items()},
                 architecture=arch, by_role={k: [a["file"] for a in v] for k, v in sorted(by_role.items())},
@@ -1134,8 +1136,18 @@ def render(r, top):
               f"with names and literals erased, are at least {cm.COPY_SIMILARITY:.0%} alike: pasted, then edited." if cm else "",
               "Same shape means the bodies match exactly once renamed. One name with two definitions",
               "is only a question until one of the other two lines says the bodies match.", ""]
+        if r.get("copies"):
+            same, edited = r["copies_exact"], r["copies_removable"] - r["copies_exact"]
+            parts = []
+            if same:
+                parts.append(f"{same} lines where the copies are the same function ({cm.COPY_EXACT:.0%} alike or more)")
+            if edited:
+                parts.append(f"at most {edited} lines where they were edited after pasting: there the differences "
+                             "have to become parameters, so the saving is less")
+            L += ["One function per cluster would save " + ", and ".join(parts) + ".", ""]
         for c in r.get("copies", []):
-            L.append(f"- copy ({c['similarity']:.0%} alike, {c['removable']} lines to save): " + ", ".join(c["members"]))
+            L.append(f"- copy ({c['similarity']:.0%} alike, {'' if c['exact'] else 'at most '}{c['removable']} lines to save): "
+                     + ", ".join(c["members"]))
         for name, where in sorted(r.get("dup_names", {}).items()):
             L.append(f"- one name, two definitions: `{name}` in {', '.join(where)}")
         for members in r.get("dup_shapes", []):
