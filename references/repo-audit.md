@@ -33,9 +33,10 @@ python3 $S/repo_map.py --repo <repo> --src <pkg dir> --src tests --md <work>/rep
 ```
 
 It parses every file, resolves calls, and reports: what each module is for,
-the layer it sits in, entry points, import cycles, hot spots by churn times
-fan-in, functions over budget, untested public functions, probably-dead
-definitions, modules that read switches, and the calls it could not resolve.
+the layer it sits in, entry points, import cycles and a rewrite order, hot
+spots by churn times fan-in, functions over budget, untested public
+functions, definitions no entry point reaches, functions that are copies of
+each other, modules that read switches, and the calls it could not resolve.
 Nothing is imported or executed, so it is safe on a tree you have not read.
 
 Read the report in this order, because each answer narrows the next:
@@ -51,8 +52,19 @@ Read the report in this order, because each answer narrows the next:
    answer moves code.
 4. **Hot spots.** Churn times fan-in is where a defect costs most. Fix here
    first; a tidy module nobody imports and nobody changes can wait forever.
-5. **Unresolved calls.** The dead and untested lists are conservative by
+5. **Possibly dead, and duplicates.** These are the trim, and the cheapest
+   lines in the tree to remove. The dead list comes from reachability, so a
+   function called only by dead code is listed with the function that calls
+   it: delete the subtree from its head down. "Only tests reach it" is test
+   support living in production code, or a feature nothing uses; decide
+   which. A copy names the lines one function would save.
+6. **Unresolved calls.** The dead and untested lists are conservative by
    exactly this much. Say so in the report rather than claiming certainty.
+
+The map is a plan, not a verdict. Its claims rest on a name-matching
+resolver: check each dead definition against a plugin, a template or a
+caller outside the tree, and read both sides of a copy, before a patch
+acts on either.
 
 **Prove the test command tests this tree before you trust a single run.**
 An editable install, a stale `site-packages` copy, or an inherited
@@ -187,8 +199,10 @@ ordering, churn times fan-in, is the first cut. Then:
 1. **Correctness risks in hot code.** A swallowed exception, a silent NULL
    coercion, an unvalidated join, a bare `except` in the module every other
    module imports.
-2. **Dead switches and dead code.** Deleting is the safest patch there is and
-   makes everything after it smaller. Verify each by hand first.
+2. **Dead switches, dead code, then copies.** Deleting is the safest patch
+   there is and makes everything after it smaller. Verify each by hand
+   first. Merging copies comes next: where two copies differ, the difference
+   is a parameter or a bug in one of them, and the message says which.
 3. **Missing characterization on hot untested functions.** This is the
    enabling work; nothing else in the list is safe without it.
 4. **Architecture: docstrings, then moves, then splits.** Cheap to review,
@@ -209,11 +223,15 @@ Each stage is separately reviewable and separately revertable:
 
 1. Docstrings and comments that only say what a module is for. `No
    functional change.`
-2. Deletions of verified-dead code. Each with the evidence in the message.
+2. Deletions of verified-dead code. Each with the evidence in the message;
+   a dead subtree is one patch.
 3. Characterization tests. Prod code untouched.
 4. Pure moves and renames. `No functional change.`
 5. Splits of oversized modules, as moves of whole functions.
 6. Internal refactors, one function or one idea per patch, tests unchanged.
+   Merging a copy is one of these. Take modules in the map's rewrite order,
+   dependencies first, so what a module imports has stopped moving before
+   the module is touched.
 7. Bug fixes found along the way, each with its own failing-then-passing test.
 8. Behaviour changes, only if asked for, each flagged in the cover letter.
 
