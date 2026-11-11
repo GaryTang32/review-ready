@@ -301,6 +301,21 @@ def call_name(func):
     return ""
 
 
+STDLIB = frozenset(getattr(sys, "stdlib_module_names", ()))
+# Top-level statements that do work when a file is run: a bare call or a loop, as opposed to the
+# imports, definitions and assignments every module has.
+RUNS = (ast.For, ast.While, ast.With, ast.Try, ast.AsyncFor, ast.AsyncWith)
+
+
+def is_external(dotted, index, repo_names):
+    """True when an imported name comes from outside this tree: no prefix of it is one of the
+    tree's modules, and its first word is either unknown here or a standard-library module."""
+    parts = dotted.split(".")
+    if any(".".join(parts[:i]) in index for i in range(1, len(parts) + 1)):
+        return False
+    return parts[0] not in repo_names or parts[0] in STDLIB
+
+
 def module_index(mods):
     """Dotted name -> rel, also by every unambiguous dotted suffix: `acme.client` finds
     src/acme/client.py, and `code_metrics` finds a script that a sibling imports by bare name."""
@@ -309,7 +324,10 @@ def module_index(mods):
         parts = m.name.split(".")
         for i in range(1, len(parts)):
             suffix[".".join(parts[i:])].add(rel)
-    index = {name: next(iter(rels)) for name, rels in suffix.items() if len(rels) == 1}
+    # A one-word suffix that is also a standard-library module is that module: `import json` is not
+    # utils/json.py. A file whose full name is `json` (at the root) still shadows it, as in Python.
+    index = {name: next(iter(rels)) for name, rels in suffix.items()
+             if len(rels) == 1 and not ("." not in name and name in STDLIB)}
     index.update({m.name: rel for rel, m in mods.items()})
     return index
 
@@ -350,7 +368,7 @@ def build_graph(mods):
             # a name defined in this module
             if hit is None and not tail and head in m.defs:
                 hit = (rel, head)
-            external = head in m.imports and m.imports[head].split(".")[0] not in ours
+            external = head in m.imports and is_external(m.imports[head], by_module, ours)
             # unique across the repo. For obj.method() the object's type is
             # unknown, so a leaf that names exactly one definition in the tree
             # is taken as that definition; ambiguous leaves stay unresolved.
@@ -369,30 +387,23 @@ def build_graph(mods):
 
 
 def import_graph(mods):
-    by_name = {m.name: rel for rel, m in mods.items()}
-    # A script that puts its own directory on sys.path imports a sibling by
-    # bare name ("import switch_detectors"), which matches no dotted module
-    # path. Index the last path segment too, but only when it is unambiguous.
-    leaf = defaultdict(list)
-    for rel, m in mods.items():
-        leaf[m.name.rsplit(".", 1)[-1]].append(rel)
+    """{module: the modules of this tree it imports}.
+
+    A dotted import runs every package on the way (`import a.b.c` runs a and a.b), so each prefix
+    is looked up. module_index() finds a module by any unambiguous dotted suffix, which is what
+    makes an absolute import under a nested package root resolve: `from svc.conf import X` is
+    deploy/svc/svc/conf.py. `from app import b` names the
+    module in the alias, so the imported names are looked up as well as the `from` part.
+    """
+    index = module_index(mods)
     g = defaultdict(set)
     for rel, m in mods.items():
-        # `from app import b` names the module in the alias, not in the `from` part
-        for target in m.import_modules | {t for t in m.imports.values() if t in by_name}:
-            if not target:
-                continue
-            hit = False
-            for name, trel in by_name.items():
-                if target == name or target.startswith(name + "."):
-                    hit = True
-                    if trel != rel:
-                        g[rel].add(trel)
-            if not hit:
-                head = target.split(".")[0]
-                cands = leaf.get(head, [])
-                if len(cands) == 1 and cands[0] != rel:
-                    g[rel].add(cands[0])
+        for target in m.import_modules | set(m.imports.values()):
+            parts = target.split(".") if target else []
+            for i in range(1, len(parts) + 1):
+                hit = index.get(".".join(parts[:i]))
+                if hit and hit != rel:
+                    g[rel].add(hit)
     return g
 
 
@@ -591,11 +602,18 @@ def python_floor(root, mods):
     return dict(floor=f"{floor[0]}.{floor[1]}" if floor else None, where=where, above=above[:12])
 
 
-def entry_points(root, mods):
+def entry_points(root, mods, imported=None):
+    """Where the tree is started from. `imported` is the set of modules something imports: with
+    it, a file that does work at its top level and that nothing imports is a script, run by hand
+    with no __main__ guard. An imported module with a setup call at the top is not."""
     eps = []
     for rel, m in sorted(mods.items()):
         if m.has_main:
             eps.append((rel, "__main__ block"))
+        elif (imported is not None and rel not in imported and not m.is_test
+              and any(isinstance(n, RUNS) or (isinstance(n, ast.Expr) and isinstance(n.value, ast.Call))
+                      for n in m.tree.body)):
+            eps.append((rel, "top-level code, imported by nothing"))
         for qual, d in m.defs.items():
             for dec in d.get("decorators", []):
                 if re.search(r"\b(command|group|task|route|app\.|cli\.|schedule|cron|periodic)\b", dec):
@@ -635,7 +653,7 @@ def bodies(m):
             yield None, node
 
 
-def value_refs(m, node, imported, by_name, repo_names):
+def value_refs(m, node, imported, by_name, external):
     """Definitions that `node` names as a value; reference_graph() states the rules."""
     bound = {a.arg for a in ast.walk(node) if isinstance(a, ast.arg)}
     bound |= {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
@@ -649,7 +667,7 @@ def value_refs(m, node, imported, by_name, repo_names):
             target = m.imports.get(via)
             if target is None:
                 out |= by_name[n.attr]
-            elif target.split(".")[0] in repo_names:      # else third-party: subprocess.run is not our run()
+            elif not external(target):                    # else third-party: subprocess.run is not our run()
                 out |= imported(f"{target}.{n.attr}") or by_name[n.attr]
         elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.isidentifier():
             out |= by_name[n.value]
@@ -702,7 +720,8 @@ def reference_graph(mods, edges):
         g[(src_rel, caller)].add((dst_rel, dst_qual))
     for rel, m in sorted(mods.items()):
         for qual, node in bodies(m):
-            g[(rel, qual)] |= value_refs(m, node, imported, by_name, repo_names)
+            g[(rel, qual)] |= value_refs(m, node, imported, by_name,
+                                         lambda dotted: is_external(dotted, by_module, repo_names))
         for qual, d in m.defs.items():
             if d["kind"] == "class":
                 g[(rel, qual)] |= class_refs(mods, rel, qual, by_name)
@@ -767,7 +786,7 @@ def analyse_repo(root, src_dirs, top):
     ig = import_graph(mods)
     cycles = find_cycles(ig)
     ch = churn(root, list(mods))
-    eps = entry_points(root, mods)
+    eps = entry_points(root, mods, imported={b for bs in ig.values() for b in bs})
 
     prod = {r: m for r, m in mods.items() if not m.is_test}
     tests = {r: m for r, m in mods.items() if m.is_test}
@@ -1519,6 +1538,10 @@ SELF_TEST_FULL = {
                 + "\n\ndef load(key):\n    total = 0\n    for part in key.split('.'):\n        total += len(part)\n"
                   "        if total > 10:\n            break\n    while total % 3:\n        total += 1\n"
                   "    return {'key': key, 'size': total}\n",
+    "app/json.py": "def dumps(x):\n    return str(x)\n",
+    "deploy/svc/svc/__init__.py": "",
+    "deploy/svc/svc/conf.py": "import json\nimport logging\n\nlogging.basicConfig()\n\n\ndef setting():\n    return json.dumps({})\n",
+    "deploy/svc/svc/job.py": "from svc.conf import setting\n\nprint(setting())\n",
     "selftest_app.py": "from app.core import process, test_support\n\n\ndef check():\n    assert process({}) == [] and test_support() == 0\n",
 }
 
@@ -1550,7 +1573,16 @@ def self_test_full():
         ("list has no push(), so an unused Stack.push is dead; append() overrides",
          "app/registry.py:Stack.push" in dead and "app/registry.py:Stack.append" not in dead),
         ("selftest_app.py is a test file", r["tests"] == 1 and dead.get("app/core.py:test_support") == "only tests reach it"),
-        ("nothing else is reported dead", len(dead) == 8),
+        ("`import json` is the standard library, not app/json.py, whose dumps() is dead",
+         dead.get("app/json.py:dumps") == "nothing references it"
+         and "app/json.py" not in r["import_graph"].get("deploy/svc/svc/conf.py", [])),
+        ("nothing else is reported dead", len(dead) == 9),
+        ("an absolute import under a nested package root resolves",
+         "deploy/svc/svc/conf.py" in r["import_graph"].get("deploy/svc/svc/job.py", [])),
+        ("a file that runs at top level and nothing imports is an entry point",
+         ["deploy/svc/svc/job.py", "top-level code, imported by nothing"] in [list(e) for e in r["entry_points"]]),
+        ("an imported module with a setup call at the top is not",
+         not any(e[0] == "deploy/svc/svc/conf.py" for e in r["entry_points"])),
         ("an edited, renamed copy is found", len(copies) == 1 and len(copies[0]) == 2 and "walk_depth" in copies[0][0]),
         ("one name with two unrelated bodies is not a copy",
          "load" in r["dup_names"] and not any("load" in m for c in copies for m in c)),
