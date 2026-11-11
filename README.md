@@ -104,6 +104,11 @@ switches; and function-level measurement of length, nesting, density, loop
 cost and return shape. Every detector has a line it must match and one it must
 not. The full list is in the [field guide](https://garytang32.github.io/review-ready/).
 
+In audit mode the whole-repo map plans the trim before anything is rewritten:
+what no entry point reaches (grouped into dead subtrees), functions that are
+copies of each other by token similarity, and a rewrite order that takes
+dependencies first.
+
 It is opinionated about things that are easy to get wrong and expensive to
 find later: look-ahead leakage in a feature, a merge with no `validate`, a
 missing value turned into a number, a naive clock in market code, SQL built
@@ -117,9 +122,9 @@ absent and reports green.
 | `build_series.py --self-test` | 25 whole situations in scratch repositories |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
-| `code_metrics.py` | 31 |
+| `code_metrics.py` | 37 |
 | `comment_audit.py --self-test` | 17, eight of which must find nothing |
-| `repo_map.py --self-test` | 11, the focus map against a scratch repo with one planted case per finding |
+| `repo_map.py --self-test` | 27: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts

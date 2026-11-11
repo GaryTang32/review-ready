@@ -29,7 +29,7 @@ Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
 (`build_series.py --self-test`: twenty-five situations in scratch repos;
-`repo_map.py --self-test`: the focus map, eleven cases).
+`repo_map.py --self-test`: the focus map and the whole-tree map, 27 cases).
 
 ## References: read the one the moment calls for
 
@@ -408,16 +408,23 @@ python3 $S/repo_map.py --repo $R --src <pkg dir> --src tests --md $W/repo-map.md
 python3 $S/comment_audit.py --repo $R --src <pkg dir> --md $W/comments.md
 ```
 
-Both take directories, and the tests too, or tested code reads as dead. Then
-read from the entry points down, trace one path end to end, and judge against
-the objective using the references above. The order of the work:
+Both take directories, and the tests too, or tested code reads as dead. The
+work has three phases, in this order: **understand** (the map, then read from
+the entry points down and trace one path end to end), **plan** (`audit.md`),
+then **trim and rewrite** (the series). The map supplies the plan's raw
+material: what no entry point reaches, grouped into dead subtrees; functions
+that are copies of each other, with the lines one would save; and a rewrite
+order, dependencies first. Check each claim by reading before a patch acts
+on it. The order of the work:
 1. Fix the architecture so the layout explains itself, landed as pure
    `git mv` patches.
 2. **Characterize before refactoring**, because a function nothing pins
    cannot be refactored, only rewritten.
 3. Write `audit.md` from [templates/audit.md](templates/audit.md).
-4. The series: deletions first and anything that changes behaviour last,
-   stopping at a size someone will review and deferring the rest in writing.
+4. The series: trim first (verified-dead subtrees, then merged copies), then
+   the rewrites to minimal-code.md in the map's rewrite order, and anything
+   that changes behaviour last. Stop at a size someone will review and defer
+   the rest in writing.
 
 Run the map again and put the before and after numbers in the cover letter.
 
