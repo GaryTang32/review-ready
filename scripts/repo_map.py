@@ -28,7 +28,8 @@ dead-code claim is only as good as the resolver behind it.
 
 Sections of the report:
   layout          packages, module count, lines, test files
-  entry points    __main__ blocks, console_scripts, CLI parsers, schedulers
+  entry points    __main__ blocks, console_scripts, CLI parsers, schedulers, and files that
+                  run at their top level and that nothing imports
   layering        the import graph by package, every cycle, and a rewrite order: modules
                   dependencies first, those that import each other grouped (Tarjan)
   hot spots       fan-in, fan-out, churn from git, and size
@@ -39,8 +40,9 @@ Sections of the report:
   switches        modules that read config, env, flags, or the clock
   dense           short functions with too many paths or a condition with too many terms
   return shapes   functions returning a value on one path and None on another
-  duplicates      copies by token similarity with the lines one function would save, renamed
-                  copies of one body, and one name defined in two modules
+  duplicates      copies by token similarity, each cluster built around one function and
+                  marked the same function or edited after pasting, with the lines one copy
+                  would save; renamed copies of one body; one name defined in two modules
   lazy imports    repo modules imported inside a function, usually hiding a cycle
   risks           security, data, performance, concurrency and logging patterns
   weak tests      test functions that assert nothing
