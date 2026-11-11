@@ -484,6 +484,18 @@ def config_switches(root, code_text):
     The AST cannot find these because the key is not Python. Tool sections are
     skipped, since the tool reads those.
     """
+    # One regex search of the whole tree per key is quadratic: a repo with a hundred config files
+    # spent half its run here. A key made only of word characters is read if and only if it is one
+    # of the tree's words, so those are a set lookup; other keys are searched once and remembered.
+    words = set(re.findall(r"\w+", code_text))
+    seen = {}
+
+    def read_somewhere(key):
+        if key not in seen:
+            seen[key] = key in words if re.fullmatch(r"\w+", key) else bool(re.search(
+                r"""["']""" + re.escape(key) + r"""["']|\b""" + re.escape(key) + r"\b", code_text))
+        return seen[key]
+
     out = []
     for base, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
@@ -515,7 +527,7 @@ def config_switches(root, code_text):
                 key = m.group(1)
                 if len(key) < 3 or TOOL_SECTION.match(section) or TOOL_SECTION.match(key):
                     continue
-                if not re.search(r"""["']""" + re.escape(key) + r"""["']|\b""" + re.escape(key) + r"\b", code_text):
+                if not read_somewhere(key):
                     dead.append((section, key))
             if dead:
                 out.append((rel, dead))
