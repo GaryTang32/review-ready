@@ -41,9 +41,12 @@ Nothing is imported or executed, so it is safe on a tree you have not read.
 
 Read the report in this order, because each answer narrows the next:
 
-1. **Entry points.** Everything reachable starts here. A module reachable
-   from no entry point and no test is a candidate for deletion, not a
-   candidate for refactoring.
+1. **Entry points.** Everything reachable starts here. A file that does its
+   work at the top level and that nothing imports is listed as a script, even
+   with no `__main__` block. A module that nothing imports and that runs
+   nothing is a candidate for deletion, not for refactoring, unless the tree
+   loads it by name: a plugin directory read with `importlib` looks exactly
+   like that, so find the loader before deleting.
 2. **The module table.** Any row whose purpose reads `defines ...` is a
    module with no docstring: an outsider cannot place it without reading it.
    That is finding number one, and the cheapest to fix.
@@ -57,7 +60,11 @@ Read the report in this order, because each answer narrows the next:
    function called only by dead code is listed with the function that calls
    it: delete the subtree from its head down. "Only tests reach it" is test
    support living in production code, or a feature nothing uses; decide
-   which. A copy names the lines one function would save.
+   which. A copy cluster is every function alike to one centre function.
+   Where the copies are the same function (95% alike or more) one copy
+   replaces the rest and the lines saved are real. Where they were edited
+   after pasting, the figure is an upper bound: the differences have to
+   become parameters.
 6. **Unresolved calls.** The dead and untested lists are conservative by
    exactly this much. Say so in the report rather than claiming certainty.
 
