@@ -29,15 +29,18 @@ dead-code claim is only as good as the resolver behind it.
 Sections of the report:
   layout          packages, module count, lines, test files
   entry points    __main__ blocks, console_scripts, CLI parsers, schedulers
-  layering        the import graph by package, and every cycle
+  layering        the import graph by package, every cycle, and a rewrite order: modules
+                  dependencies first, those that import each other grouped (Tarjan)
   hot spots       fan-in, fan-out, churn from git, and size
   the big ones    functions over the length or nesting budget
   untested        public functions no test names or reaches
-  dead            defined, never referenced, not exported, not an entry point
+  dead            what no entry point reaches, by reachability over calls and names used as
+                  values: nothing references it, only dead code does, or only tests do
   switches        modules that read config, env, flags, or the clock
   dense           short functions with too many paths or a condition with too many terms
   return shapes   functions returning a value on one path and None on another
-  duplicates      one name defined in two modules, and renamed copies of one body
+  duplicates      copies by token similarity with the lines one function would save, renamed
+                  copies of one body, and one name defined in two modules
   lazy imports    repo modules imported inside a function, usually hiding a cycle
   risks           security, data, performance, concurrency and logging patterns
   weak tests      test functions that assert nothing
@@ -47,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins
 import io
 import json
 import os
@@ -82,9 +86,10 @@ FUNC = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
 def is_test(rel):
+    """A test directory, or a file whose name has test/tests/selftest as a word (test_x, x_test, selftest_x)."""
     base = os.path.basename(rel)
-    return (re.search(r"(^|/)(tests?|__tests__)/", rel) or base.startswith("test_")
-            or base.endswith("_test.py") or base == "conftest.py")
+    return bool(re.search(r"(^|/)(tests?|__tests__)/", rel) or base == "conftest.py"
+                or re.search(r"(^|_)(self)?tests?(_|\.py$)", base))
 
 
 def max_depth(node, d=0):
@@ -296,9 +301,25 @@ def call_name(func):
     return ""
 
 
+def module_index(mods):
+    """Dotted name -> rel, also by every unambiguous dotted suffix: `acme.client` finds
+    src/acme/client.py, and `code_metrics` finds a script that a sibling imports by bare name."""
+    suffix = defaultdict(set)
+    for rel, m in mods.items():
+        parts = m.name.split(".")
+        for i in range(1, len(parts)):
+            suffix[".".join(parts[i:])].add(rel)
+    index = {name: next(iter(rels)) for name, rels in suffix.items() if len(rels) == 1}
+    index.update({m.name: rel for rel, m in mods.items()})
+    return index
+
+
 def build_graph(mods):
     """Resolve calls to (module rel, qualname). Returns edges and unresolved."""
-    by_module = {m.name: m for m in mods.values()}
+    by_module = {name: mods[rel] for name, rel in module_index(mods).items()}
+    # A name imported from a package this tree does not hold is third-party or stdlib: `subprocess.run()`
+    # is never this tree's run(), however unique that name is here.
+    ours = {seg for m in mods.values() for seg in m.name.split(".")}
     # repo-wide index of simple names -> [(rel, qual)]
     index = defaultdict(list)
     for rel, m in mods.items():
@@ -329,10 +350,11 @@ def build_graph(mods):
             # a name defined in this module
             if hit is None and not tail and head in m.defs:
                 hit = (rel, head)
+            external = head in m.imports and m.imports[head].split(".")[0] not in ours
             # unique across the repo. For obj.method() the object's type is
             # unknown, so a leaf that names exactly one definition in the tree
             # is taken as that definition; ambiguous leaves stay unresolved.
-            if hit is None:
+            if hit is None and not external:
                 leaf = target.split(".")[-1]
                 # production code never calls into a test module: `fh.write()` is not tests' write()
                 cands = [c for c in index.get(leaf, []) if m.is_test or not mods[c[0]].is_test]
@@ -340,7 +362,8 @@ def build_graph(mods):
                     hit = cands[0]
             if hit:
                 edges.append((rel, caller, hit[0], hit[1], line))
-            elif head not in ("self", "cls") and not target.startswith(("os.", "sys.", "re.", "json.")):
+            elif head not in ("self", "cls") and not external \
+                    and not target.startswith(("os.", "sys.", "re.", "json.")):
                 unresolved[target] += 1
     return edges, unresolved
 
@@ -355,7 +378,8 @@ def import_graph(mods):
         leaf[m.name.rsplit(".", 1)[-1]].append(rel)
     g = defaultdict(set)
     for rel, m in mods.items():
-        for target in m.import_modules:
+        # `from app import b` names the module in the alias, not in the `from` part
+        for target in m.import_modules | {t for t in m.imports.values() if t in by_name}:
             if not target:
                 continue
             hit = False
@@ -395,6 +419,41 @@ def find_cycles(g):
         if key not in seen:
             seen.add(key); out.append(c)
     return out
+
+
+def rewrite_order(g, rels):
+    """Strongly connected components of the import graph (Tarjan), dependencies first.
+
+    A module is rewritten after everything it imports, so its dependencies no longer move under
+    it. Modules that import each other form one group: no order within it is safe.
+    """
+    keep = set(rels)
+    index, low, on, stack, groups = {}, {}, set(), [], []
+    for root in rels:
+        if root in index:
+            continue
+        index[root] = low[root] = len(index)
+        stack.append(root); on.add(root)
+        work = [(root, iter(sorted(x for x in g.get(root, ()) if x in keep)))]
+        while work:
+            node, it = work[-1]
+            nxt = next((w for w in it if w not in index or w in on), None)
+            if nxt is None:
+                work.pop()
+                if work:
+                    low[work[-1][0]] = min(low[work[-1][0]], low[node])
+                if low[node] == index[node]:
+                    group = []
+                    while not group or group[-1] != node:
+                        group.append(stack.pop()); on.discard(group[-1])
+                    groups.append(sorted(group))
+            elif nxt in index:
+                low[node] = min(low[node], index[nxt])
+            else:
+                index[nxt] = low[nxt] = len(index)
+                stack.append(nxt); on.add(nxt)
+                work.append((nxt, iter(sorted(x for x in g.get(nxt, ()) if x in keep))))
+    return groups
 
 
 def churn(root, rels):
@@ -535,13 +594,157 @@ def entry_points(root, mods):
         p = os.path.join(root, cfg)
         if os.path.exists(p):
             text = open(p, encoding="utf-8", errors="replace").read()
-            for m2 in re.finditer(r"^\s*([\w-]+)\s*=\s*[\"']([\w.]+):([\w.]+)[\"']", text, re.M):
+            for m2 in re.finditer(r"^\s*([\w-]+)\s*=\s*[\"']?([\w.]+):([\w.]+)[\"']?\s*$", text, re.M):
                 eps.append((f"{m2.group(2)}:{m2.group(3)}", f"console_script {m2.group(1)}"))
     seen, out = set(), []
     for e in eps:
         if e not in seen:
             seen.add(e); out.append(e)
     return out
+
+
+# Decorators that wrap a function without registering it anywhere. Any other decorator (a route, a
+# CLI command, a fixture, a task) is taken as registration, which keeps the function alive.
+PLAIN_DECORATOR = re.compile(
+    r"^(property|staticmethod|classmethod|abstractmethod|cached_property|contextmanager|asynccontextmanager|"
+    r"lru_cache|cache|wraps|overload|dataclass|total_ordering|"
+    r"(functools|contextlib|abc|typing|dataclasses)\.\w+|\w+\.(setter|getter|deleter))\b")
+
+
+def bodies(m):
+    """(qualname or None, node) for every top-level function, method, and other statement of a module."""
+    for node in m.tree.body:
+        if isinstance(node, FUNC):
+            yield node.name, node
+        elif isinstance(node, ast.ClassDef):
+            for sub in node.body:
+                yield (f"{node.name}.{sub.name}" if isinstance(sub, FUNC) else node.name), sub
+        else:
+            yield None, node
+
+
+def value_refs(m, node, imported, by_name, repo_names):
+    """Definitions that `node` names as a value; reference_graph() states the rules."""
+    bound = {a.arg for a in ast.walk(node) if isinstance(a, ast.arg)}
+    bound |= {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+    out = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name):
+            if isinstance(n.ctx, ast.Load) and n.id not in bound:
+                out |= {(m.rel, n.id)} if n.id in m.defs else imported(m.imports.get(n.id, ""))
+        elif isinstance(n, ast.Attribute):
+            via = n.value.id if isinstance(n.value, ast.Name) and n.value.id not in bound else None
+            target = m.imports.get(via)
+            if target is None:
+                out |= by_name[n.attr]
+            elif target.split(".")[0] in repo_names:      # else third-party: subprocess.run is not our run()
+                out |= imported(f"{target}.{n.attr}") or by_name[n.attr]
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.isidentifier():
+            out |= by_name[n.value]
+    return out
+
+
+def class_refs(mods, rel, qual, by_name):
+    """What a class keeps alive: its base classes in this tree, and the methods something may call unseen.
+
+    Dunders are called by the language. A method may override one its base calls: for a builtin
+    base that is knowable (list has no unregister()); for any other base this tree does not
+    define it is not, so every method of such a class stays alive.
+    """
+    m = mods[rel]
+    out, inherited, unknown = set(), set(), False
+    for base in (b.split("[")[0].split(".")[-1] for b in m.defs[qual].get("bases", [])):
+        base_classes = {k for k in by_name[base] if mods[k[0]].defs[k[1]]["kind"] == "class"}
+        out |= base_classes
+        builtin = getattr(builtins, base, None)
+        if isinstance(builtin, type):
+            inherited |= set(dir(builtin))
+        elif not base_classes:
+            unknown = True
+    return out | {(rel, q) for q, x in m.defs.items() if x["cls"] == qual
+                  and (unknown or x["name"].startswith("__") or x["name"] in inherited)}
+
+
+def reference_graph(mods, edges):
+    """{caller: definitions it calls or names as a value}, the graph a dead-code claim has to survive.
+
+    Calls come from the resolver. A bare name can only be a definition in the same module or an
+    imported one, alias included. An attribute through an imported module is exact. Any other
+    attribute, and any string that is an identifier, keeps EVERY definition of that name alive: the
+    object's type is unknown, and getattr() and registries name functions by string.
+    """
+    by_module = {name: mods[rel] for name, rel in module_index(mods).items()}
+    repo_names = {seg for m in mods.values() for seg in m.name.split(".")}
+    by_name = defaultdict(set)
+    for rel, m in mods.items():
+        for qual, d in m.defs.items():
+            by_name[d["name"]].add((rel, qual))
+
+    def imported(dotted):
+        mod_part, _, leaf = dotted.rpartition(".")
+        hit = by_module.get(mod_part)
+        return {(hit.rel, leaf)} if hit and leaf in hit.defs else set()
+
+    g = defaultdict(set)
+    for src_rel, caller, dst_rel, dst_qual, _line in edges:
+        g[(src_rel, caller)].add((dst_rel, dst_qual))
+    for rel, m in sorted(mods.items()):
+        for qual, node in bodies(m):
+            g[(rel, qual)] |= value_refs(m, node, imported, by_name, repo_names)
+        for qual, d in m.defs.items():
+            if d["kind"] == "class":
+                g[(rel, qual)] |= class_refs(mods, rel, qual, by_name)
+    return g
+
+
+def reach(g, roots):
+    seen, todo = set(roots), list(roots)
+    while todo:
+        for nxt in g.get(todo.pop(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                todo.append(nxt)
+    return seen
+
+
+def find_dead(mods, edges, eps):
+    """Definitions no entry point reaches, as rows grouped into dead subtrees.
+
+    Roots: module-level code, anything registered by a decorator, __all__, console scripts and
+    main(). A definition with no path from a root is dead even when something calls it, if the
+    caller is dead too; counting references alone keeps such a subtree alive for ever.
+    """
+    g = reference_graph(mods, edges)
+    index = module_index(mods)
+    prod = {(rel, q) for rel, m in mods.items() if not m.is_test for q in m.defs}
+    roots = {(rel, None) for rel, m in mods.items() if not m.is_test}
+    for rel, qual in prod:
+        d, m = mods[rel].defs[qual], mods[rel]
+        if (d["name"] == "main" or any(not PLAIN_DECORATOR.match(dec) for dec in d["decorators"])
+                or (m.all_exports is not None and d["name"] in m.all_exports)):
+            roots.add((rel, qual))
+    for where, _how in eps:                       # console scripts: "pkg.mod:func"
+        modname, _, fn = where.partition(":")
+        if fn and modname in index:
+            roots.add((index[modname], fn))
+    live = reach(g, roots)
+    tested = reach(g, {(rel, None) for rel, m in mods.items() if m.is_test}
+                   | {(rel, q) for rel, m in mods.items() if m.is_test for q in m.defs})
+    dead = {k for k in prod - live if not (mods[k[0]].defs[k[1]]["cls"] and (k[0], mods[k[0]].defs[k[1]]["cls"]) in prod - live)}
+    callers = defaultdict(set)
+    for a, bs in g.items():
+        for b in bs:
+            if a in dead and a != b:
+                callers[b].add(a)
+    rows = []
+    for rel, qual in sorted(dead):
+        d = mods[rel].defs[qual]
+        above = sorted(f"{r}:{q}" for r, q in callers[(rel, qual)])
+        why = ("only tests reach it" if (rel, qual) in tested else
+               f"reached only from dead code: {above[0]}" if above else "nothing references it")
+        rows.append(dict(file=rel, qual=qual, line=d["line"], kind=d["kind"], private=d["private"],
+                         lines=d["length"], why=why, head=not above))
+    return rows
 
 
 def analyse_repo(root, src_dirs, top):
@@ -595,20 +798,13 @@ def analyse_repo(root, src_dirs, top):
             fan_in[b] += 1
 
     ep_files = {e[0].split(":")[0] for e in eps}
-    dead, untested, big = [], [], []
+    dead = find_dead(mods, edges, eps)
+    untested, big = [], []
     for rel, m in prod.items():
-        exports = m.all_exports
         for qual, d in m.defs.items():
             key = (rel, qual)
             n = d["name"]
             is_entry = rel in ep_files or n in ("main", "__init__") or n.startswith("__")
-            exported = exports is not None and n in exports
-            overridden = d["kind"] == "method" and (n.startswith("__") or n in ("run", "handle", "process"))
-            # A definition is alive if anything calls it, names it as a value,
-            # or mentions it in a string; the last covers getattr and registries.
-            if (called[key] == 0 and refs[n] == 0 and not is_entry and not exported
-                    and not overridden and n not in test_names):
-                dead.append(dict(file=rel, qual=qual, line=d["line"], kind=d["kind"], private=d["private"]))
             if (d["kind"] != "class" and not d["private"] and key not in called_from_test
                     and not is_entry and called[key] + refs[n] > 0):
                 tier = ("reachable from a test, never called by one" if key in reachable
@@ -638,8 +834,10 @@ def analyse_repo(root, src_dirs, top):
     same_name, prints = defaultdict(list), defaultdict(list)
     risks = defaultdict(list)
     by_name = {m.name: rel for rel, m in mods.items()}
+    shingled, lengths = {}, {}
     if cm:
         for rel, m in sorted(mods.items()):
+            src_lines = m.src.splitlines()
             for node in ast.walk(m.tree):
                 if not isinstance(node, FUNC):
                     continue
@@ -667,6 +865,10 @@ def analyse_repo(root, src_dirs, top):
                 fp = cm.fingerprint(node)
                 if fp:
                     prints[fp].append((rel, node.name, node.lineno))
+                sh = cm.copy_shingles(src_lines, node)
+                if sh:
+                    shingled[(rel, node.name, node.lineno)] = sh
+                    lengths[(rel, node.name, node.lineno)] = got["length"]
                 # a repo module imported inside a function body
                 for sub in ast.walk(node):
                     targets = []
@@ -694,7 +896,14 @@ def analyse_repo(root, src_dirs, top):
             for ln, name, group, text in rd.scan_source(m.src, is_test=m.is_test):
                 risks[(group, name)].append((rel, ln, text))
     dup_names = {n: sorted(set(v)) for n, v in same_name.items() if len(set(v)) > 1}
-    dup_shapes = [v for k, v in prints.items() if len(v) > 1 and not k.startswith("test:")]
+    # Copies by similarity: the shape hash only finds bodies that are identical once renamed.
+    copies = [dict(similarity=low, members=[f"{r_}:{n_} (line {l_})" for r_, n_, l_ in members],
+                   removable=sum(lengths[k] for k in members) - max(lengths[k] for k in members))
+              for low, members in (cm.copy_clusters(cm.near_copies(shingled)) if cm else [])]
+    copies.sort(key=lambda c: -c["removable"])
+    in_copy = {(r_, n_) for c in copies for r_, n_ in (x.split(" (")[0].split(":") for x in c["members"])}
+    dup_shapes = [v for k, v in prints.items() if len(v) > 1 and not k.startswith("test:")
+                  and not all((r_, n_) in in_copy for r_, n_, _l in v)]
     dup_tests = [v for k, v in prints.items() if len(v) > 2 and k.startswith("test:")]
 
     depths = layer_depths(ig, set(prod))
@@ -747,6 +956,12 @@ def analyse_repo(root, src_dirs, top):
                              detail=f"`{name}` is defined in " + " and ".join(where[:3]) + ".",
                              fix="Keep one. If they differ, the difference is the finding; if they do not, "
                                  "one of them is a copy."))
+    for c in copies[:6]:
+        findings.append(dict(kind="copied function",
+                             detail=" and ".join(c["members"][:3]) + f" are at least {c['similarity']:.0%} alike: "
+                                    f"one would do, saving {c['removable']} lines.",
+                             fix="Keep one, called from every place; where they differ, the difference is a parameter "
+                                 "or a bug in one of them."))
     for members in dup_shapes[:6]:
         findings.append(dict(kind="renamed copy",
                              detail=" and ".join(f"{r_}:{n_}" for r_, n_, _l in members[:3])
@@ -773,7 +988,7 @@ def analyse_repo(root, src_dirs, top):
                 packages={k: len(v) for k, v in sorted(pkgs.items())},
                 entry_points=eps, cycles=cycles, hot=hot[:top], big=big[:top],
                 untested=untested[:top], dead=dead[:top],
-                dead_total=len(dead), untested_total=len(untested), big_total=len(big),
+                dead_total=len(dead), dead_lines=sum(d["lines"] for d in dead), untested_total=len(untested), big_total=len(big),
                 edges=len(edges), unresolved=unresolved.most_common(12),
                 unresolved_total=sum(unresolved.values()),
                 switch_modules=sorted(((m.switch_lines, rel) for rel, m in prod.items()
@@ -782,6 +997,8 @@ def analyse_repo(root, src_dirs, top):
                 dense=dense[:top], return_shapes=shapes[:top], stale_docs=stale_docs[:top],
                 weak_tests=weak_tests[:top], lazy_imports=lazy_imports[:top],
                 dup_names=dup_names, dup_shapes=dup_shapes[:top], dup_tests=dup_tests[:top],
+                copies=copies[:top], copies_removable=sum(c["removable"] for c in copies),
+                rewrite_order=rewrite_order(ig, sorted(prod)),
                 risks={f"{g}|{n}": v for (g, n), v in risks.items()},
                 architecture=arch, by_role={k: [a["file"] for a in v] for k, v in sorted(by_role.items())},
                 arch_findings=findings,
@@ -860,6 +1077,11 @@ def render(r, top):
     else:
         L.append("No import cycles.")
     L.append("")
+    if r.get("rewrite_order"):
+        L += ["Rewrite order, dependencies first, so each module's imports are settled before it is touched.",
+              "Modules in one bracket import each other and move together:", ""]
+        L += [f"{i}. " + (g[0] if len(g) == 1 else "[" + ", ".join(g) + "]") for i, g in enumerate(r["rewrite_order"], 1)]
+        L.append("")
     L += ["## Hot spots", "",
           "Ordered by churn times fan-in: the code most changed and most depended on.", "",
           "| file | lines | defs | fan-in | fan-out | commits | switch lines |",
@@ -894,10 +1116,14 @@ def render(r, top):
         for x in r["loop_costs"]:
             L.append(f"- {x['file']}:{x['line']} `{x['name']}`: " + "; ".join(x["why"]))
         L.append("")
-    if r.get("dup_names") or r.get("dup_shapes") or r.get("dup_tests"):
+    if r.get("dup_names") or r.get("dup_shapes") or r.get("dup_tests") or r.get("copies"):
         L += ["## Duplicates", "",
-              "\"Search before writing\" checked against the tree. Same shape means the bodies match",
-              "once names and constants are erased: a copy that was pasted and renamed.", ""]
+              "\"Search before writing\" checked against the tree. A copy is two functions whose tokens,",
+              f"with names and literals erased, are at least {cm.COPY_SIMILARITY:.0%} alike: pasted, then edited." if cm else "",
+              "Same shape means the bodies match exactly once renamed. One name with two definitions",
+              "is only a question until one of the other two lines says the bodies match.", ""]
+        for c in r.get("copies", []):
+            L.append(f"- copy ({c['similarity']:.0%} alike, {c['removable']} lines to save): " + ", ".join(c["members"]))
         for name, where in sorted(r.get("dup_names", {}).items()):
             L.append(f"- one name, two definitions: `{name}` in {', '.join(where)}")
         for members in r.get("dup_shapes", []):
@@ -948,13 +1174,16 @@ def render(r, top):
     for u in r["untested"]:
         L.append(f"| {u['file']} | {u['qual']} | {u['line']} | {u['callers']} | {u.get('tier', '')} |")
     L.append("")
-    L += [f"## Possibly dead ({r['dead_total']})", "",
-          "Defined, never called from this tree, not exported, not an entry point, not named",
-          "in a test. Check each against dynamic use (getattr, registry, plugin, template)",
-          "before deleting; the resolver cannot see those.", "",
-          "| file | name | line | kind |", "|---|---|---:|---|"]
+    L += [f"## Possibly dead ({r['dead_total']}, {r.get('dead_lines', 0)} lines)", "",
+          "No entry point reaches these: not module-level code, a registered or exported name, a",
+          "console script, or anything those call or name. One reached only from dead code is dead",
+          "with it, so delete a subtree from its head down. \"Only tests reach it\" is test support",
+          "living in production code, or a feature nothing uses. A name is kept alive by any",
+          "attribute or string that spells it, so this list errs towards silence; still check each",
+          "against a plugin, a template or a caller outside this tree before deleting.", "",
+          "| file | name | line | kind | lines | why |", "|---|---|---:|---|---:|---|"]
     for d in r["dead"]:
-        L.append(f"| {d['file']} | {d['qual']} | {d['line']} | {d['kind']} |")
+        L.append(f"| {d['file']} | {d['qual']} | {d['line']} | {d['kind']} | {d['lines']} | {d['why']} |")
     L.append("")
     if r.get("dead_config"):
         L += ["## Config keys nothing reads", "",
@@ -1015,20 +1244,24 @@ def changed_lines(repo, base, head):
 
 
 def fingerprints(mods):
-    """{(rel, qual): shape hash} for every production function big enough to call a copy."""
-    out = {}
+    """({(rel, qual): shape hash}, {(rel, qual): shingles}) for production functions big enough to be a copy."""
+    shapes, shingled = {}, {}
     if not cm:
-        return out
+        return shapes, shingled
     for rel, m in mods.items():
         if m.is_test:
             continue
+        src_lines = m.src.splitlines()
         for node in ast.walk(m.tree):
-            if isinstance(node, FUNC):
-                fp = cm.fingerprint(node)
-                qual = next((q for q, d in m.defs.items() if d["line"] == node.lineno), None)
-                if fp and qual:
-                    out[(rel, qual)] = fp
-    return out
+            qual = next((q for q, d in m.defs.items() if d["line"] == node.lineno), None) if isinstance(node, FUNC) else None
+            if not qual:
+                continue
+            fp, sh = cm.fingerprint(node), cm.copy_shingles(src_lines, node)
+            if fp:
+                shapes[(rel, qual)] = fp
+            if sh:
+                shingled[(rel, qual)] = sh
+    return shapes, shingled
 
 
 def call_chain(key, callers_of, limit=8):
@@ -1065,7 +1298,7 @@ def unplaced_calls(mod, qual, node, placed):
                and c.func.id not in known and (mod.rel, qual, c.lineno) not in placed)
 
 
-def addition_findings(mods, old, old_fp, key, prod, tests, refs, ep_names):
+def addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_names):
     """What to do about a function or class the branch added: [(group, finding)]."""
     rel, qual = key
     m, d = mods[rel], mods[rel].defs[qual]
@@ -1085,12 +1318,16 @@ def addition_findings(mods, old, old_fp, key, prod, tests, refs, ep_names):
             out.append(("one_method", dict(where=where, methods=methods)))
         return out
     node = func_node(m, d)
-    fp = cm.fingerprint(node) if cm and node else None
-    twin = old_fp.get(fp)
+    twin = old_fp.get(cm.fingerprint(node)) if cm and node else None
+    mine = cm.copy_shingles(m.src.splitlines(), node) if cm and node else None
+    score, alike = max(((cm.similarity(mine, sh), k) for k, sh in old_sh.items()), default=(0, None)) if mine else (0, None)
+    if not twin and score >= cm.COPY_SIMILARITY:
+        twin = alike
     same = [f"{r}:{q}" for r, om in old.items() if r != rel and not om.is_test
             for q, x in om.defs.items() if x["name"] == name and x["kind"] != "class"]
     if twin or same:
-        out.append(("dupes", dict(where=where, shape=f"{twin[0]}:{twin[1]}" if twin else None, name=same[:3])))
+        out.append(("dupes", dict(where=where, shape=f"{twin[0]}:{twin[1]}" if twin else None,
+                                  alike=round(score, 2) if twin == alike else 1.0, name=same[:3])))
     return out
 
 
@@ -1124,7 +1361,8 @@ def focus_map(repo, base, head, src_dirs):
                if is_new(rel, qual) or (d["kind"] != "class" and any(d["line"] <= n <= d["end"] for n in ls))]
 
     sites, callers_of, callees = index_edges(mods, edges)
-    old_fp = {fp: key for key, fp in fingerprints(old).items()}
+    old_shapes, old_sh = fingerprints(old)
+    old_fp = {fp: key for key, fp in old_shapes.items()}
     refs = sum((m.refs for m in mods.values() if not m.is_test), Counter())
     placed = {(src_rel, caller, line) for src_rel, caller, _r, _q, line in edges}
 
@@ -1136,7 +1374,7 @@ def focus_map(repo, base, head, src_dirs):
         prod = [c for c in sites[key] if not mods[c[0]].is_test]
         tests = [c for c in sites[key] if mods[c[0]].is_test]
         if is_new(rel, qual):
-            for group, finding in addition_findings(mods, old, old_fp, key, prod, tests, refs, ep_names):
+            for group, finding in addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_names):
                 r[group].append(finding)
         node = func_node(mods[rel], d) if d["kind"] != "class" else None
         if node is None:
@@ -1174,7 +1412,7 @@ def render_focus(r):
         ("Added and called only by tests: dead in production", r["test_only"],
          lambda x: f"`{x['where']}` ({x['tests']} test call(s))"),
         ("Added, and the tree already has it: reuse the original (move 4)", r["dupes"],
-         lambda x: f"`{x['where']}`" + (f": same shape as `{x['shape']}`" if x["shape"] else "")
+         lambda x: f"`{x['where']}`" + (f": {x['alike']:.0%} like `{x['shape']}`" if x["shape"] else "")
                    + (f": same name as {', '.join(f'`{n}`' for n in x['name'])}" if x["name"] else "")),
     ]
     for title, items, fmt in groups:
@@ -1227,8 +1465,79 @@ SELF_TEST_BRANCH = {
 }
 
 
+DEPTH = ("def {name}(node, d=0):\n    best = d\n    for child in children(node):\n        if isinstance(child, {skip}):\n"
+         "            continue\n        {var} = d\n        if isinstance(child, NEST):\n            {var} = d + 1\n"
+         "        best = max(best, {name}(child, {var}))\n    return best\n")
+SELF_TEST_FULL = {
+    "app/__init__.py": "",
+    "app/cli.py": "import subprocess\nfrom app import a, b, handlers as h\nfrom app.core import process as run_it\n"
+                  "from app.registry import Registry, Stack, Worker\n\n\ndef main():\n    subprocess.run(['true'])\n"
+                  "    table = {'a': h.on_a, 'd': a.walk_depth, 'e': b.nesting_depth, 'l': (a.load, b.load), 'm': a.Marker}\n"
+                  "    Registry().dispatch('on_b')\n    Worker().start()\n    Stack().append(1)\n    return run_it(table)\n\n\n"
+                  "if __name__ == '__main__':\n    main()\n",
+    "app/handlers.py": "def on_a(x):\n    return x\n\n\ndef on_b(x):\n    return x\n",
+    "app/legacy.py": "def on_a(x):\n    return -x\n",
+    "app/core.py": "def process(table):\n    return sorted(table)\n\n\ndef run(cmd):\n    return cmd\n\n\n"
+                   "def orphan_head():\n    return orphan_leaf() + 1\n\n\ndef orphan_leaf():\n    return 1\n\n\n"
+                   "def test_support():\n    return 0\n",
+    "app/registry.py": "import threading\nfrom contextlib import contextmanager\n\n\ndef register(fn):\n    return fn\n\n\n"
+                       "class Registry:\n    def dispatch(self, name):\n        return getattr(self, name, None)\n\n"
+                       "    @property\n    def unused_prop(self):\n        return 1\n\n\n"
+                       "class Worker(threading.Thread):\n    def run(self):\n        return 1\n\n"
+                       "    def hook_a_framework_may_call(self):\n        return 2\n\n\n"
+                       "class Stack(list):\n    def push(self, x):\n        return x\n\n    def append(self, x):\n        return x\n\n\n"
+                       "@contextmanager\ndef scoped():\n    yield\n\n\n@register\ndef plugin_entry():\n    return 1\n",
+    "app/a.py": "from app import b\n\nNEST = ()\nchildren = list\n\n\nclass Marker(dict):\n    pass\n\n\n" + DEPTH.format(name="walk_depth", skip="(int, str, bytes)", var="nd")
+                + "\n\ndef load(path):\n    rows = []\n    with open(path) as fh:\n        for line in fh:\n"
+                  "            if line.strip():\n                rows.append(line.split(','))\n    if not rows:\n"
+                  "        raise ValueError(path)\n    return rows\n",
+    "app/b.py": "from app import a\n\nNEST = ()\nchildren = list\n\n\n" + DEPTH.format(name="nesting_depth", skip="(int, str)", var="level")
+                + "\n\ndef load(key):\n    total = 0\n    for part in key.split('.'):\n        total += len(part)\n"
+                  "        if total > 10:\n            break\n    while total % 3:\n        total += 1\n"
+                  "    return {'key': key, 'size': total}\n",
+    "selftest_app.py": "from app.core import process, test_support\n\n\ndef check():\n    assert process({}) == [] and test_support() == 0\n",
+}
+
+
+def self_test_full():
+    """The whole-tree map against a scratch project with one planted case per rule."""
+    with tempfile.TemporaryDirectory() as root:
+        for rel, text in SELF_TEST_FULL.items():
+            os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+            with open(os.path.join(root, rel), "w") as fh:
+                fh.write(text)
+        r = analyse_repo(root, [], 50)
+    dead = {f"{d['file']}:{d['qual']}": d["why"] for d in r["dead"]}
+    order = r["rewrite_order"]
+    copies = [c["members"] for c in r["copies"]]
+    pos = {rel: i for i, group in enumerate(order) for rel in group}
+    return [
+        ("nothing calls it: dead", dead.get("app/core.py:orphan_head") == "nothing references it"),
+        ("called only by dead code: dead with it",
+         dead.get("app/core.py:orphan_leaf") == "reached only from dead code: app/core.py:orphan_head"),
+        ("subprocess.run() does not keep this tree's run() alive", "app/core.py:run" in dead),
+        ("h.on_a names one module's on_a, not the other's", "app/legacy.py:on_a" in dead and "app/handlers.py:on_a" not in dead),
+        ("a function imported under an alias is alive", "app/core.py:process" not in dead),
+        ("a function named only in a string is alive", "app/handlers.py:on_b" not in dead),
+        ("a registering decorator keeps a function alive", "app/registry.py:plugin_entry" not in dead),
+        ("@contextmanager and @property do not", {"app/registry.py:scoped", "app/registry.py:Registry.unused_prop"} <= set(dead)),
+        ("a method of a class with a foreign base is left alone",
+         "app/registry.py:Worker.hook_a_framework_may_call" not in dead),
+        ("list has no push(), so an unused Stack.push is dead; append() overrides",
+         "app/registry.py:Stack.push" in dead and "app/registry.py:Stack.append" not in dead),
+        ("selftest_app.py is a test file", r["tests"] == 1 and dead.get("app/core.py:test_support") == "only tests reach it"),
+        ("nothing else is reported dead", len(dead) == 8),
+        ("an edited, renamed copy is found", len(copies) == 1 and len(copies[0]) == 2 and "walk_depth" in copies[0][0]),
+        ("one name with two unrelated bodies is not a copy",
+         "load" in r["dup_names"] and not any("load" in m for c in copies for m in c)),
+        ("modules that import each other are one group", ["app/a.py", "app/b.py"] in order),
+        ("dependencies come first in the rewrite order",
+         pos["app/core.py"] < pos["app/cli.py"] and pos["app/a.py"] < pos["app/cli.py"]),
+    ]
+
+
 def self_test():
-    """--focus against a scratch repo with one planted case per finding."""
+    """--focus against a scratch repo with one planted case per finding, then the whole-tree map."""
     env = dict(os.environ, GIT_AUTHOR_NAME="T", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="T",
                GIT_COMMITTER_EMAIL="t@example.com", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
 
@@ -1256,7 +1565,7 @@ def self_test():
         ("a class with one method is named", "`pkg/fmt.py:Formatter`: only `Formatter.fmt`"),
         ("an addition nothing calls is named", "`pkg/loader.py:never_called`"),
         ("an addition only tests call is named", "`pkg/loader.py:only_tested` (1 test call(s))"),
-        ("a copy of an existing function is found by shape", "`pkg/loader.py:dedupe`: same shape as `pkg/util.py:unique`"),
+        ("a renamed copy of an existing function is found", "`pkg/loader.py:dedupe`: 100% like `pkg/util.py:unique`"),
         ("the chain runs from the entry point down",
          "`pkg/cli.py:main` -> `pkg/pipeline.py:run` -> `pkg/loader.py:load`"),
         ("a caller is shown with the line that calls", "`pkg/pipeline.py:5`: `return len(load(path))`"),
@@ -1274,7 +1583,11 @@ def self_test():
         print(("ok   " if ok else "FAIL ") + name)
     if failed:
         print(text)
-    print(f"{len(checks) + 3} cases, {failed} failing")
+    full = self_test_full()
+    for name, ok in full:
+        failed += not ok
+        print(("ok   " if ok else "FAIL ") + name)
+    print(f"{len(checks) + 3 + len(full)} cases, {failed} failing")
     return 1 if failed else 0
 
 
