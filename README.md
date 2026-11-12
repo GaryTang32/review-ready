@@ -51,7 +51,7 @@ a branch you already have.
 ## Your branch is safe
 
 The whole pass happens *beside* your branch. The series is built on a detached
-HEAD in a private worktree and kept in a ref; no branch is created or deleted;
+HEAD in a private worktree outside the repo and kept in a ref; no branch is created or deleted;
 your checkout is never touched. If the session dies half way, you are exactly
 where you started.
 
@@ -119,7 +119,7 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 28 whole situations in scratch repositories |
+| `build_series.py --self-test` | 31 whole situations in scratch repositories |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |
@@ -129,11 +129,14 @@ absent and reports green.
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts
 it in a state that once went wrong, and asserts on the exit code, the output
-and the resulting git state. 22 of the 28 are the residue of a real defect
-found by review or by a run. Five pin the size gate: a verbatim series
-cannot land, a rewritten one can, keeping more than half needs a stated
-reason, and a series that joins statements or runs lines together to halve
-its line count fails. One holds write mode to each patch's budget.
+and the resulting git state. 24 of the 31 are the residue of a real defect
+found by review or by a run; the latest two are a package that the series
+itself creates, and a check that could see the checkout's configuration in
+the directory above it. Six pin the size gate: a verbatim series cannot
+land, a rewritten one can, keeping more than half needs a stated reason,
+and a series that joins statements, runs lines together or deletes blank
+lines to halve its line count fails. One holds write mode to each patch's
+budget.
 
 ## Documentation
 

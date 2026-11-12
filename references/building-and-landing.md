@@ -89,8 +89,10 @@ no local database, no untracked fixture. On a `src/` layout set
 `PYTHONPATH=src`, **relative**. An absolute one points at the user's
 checkout, and every check would then pass or fail on the original code
 whatever the series contains. Always set `--import-check`, which catches
-that. A result of "did not run", "timed out" or "vacuous" says nothing about
-the code: fix the command. No tests, or tests needing a service: say so,
+that. A package the series itself creates cannot import at the base; the
+builder asks again after each patch and stops if it never imports. A result
+of "did not run", "timed out" or "vacuous" says nothing about the code: fix
+the command. No tests, or tests needing a service: say so,
 characterize what you will touch, and put "untested beyond this" in the open
 questions (testing.md section 5).
 
@@ -150,7 +152,10 @@ python3 $S/build_series.py $W/plan.json
 **The build never moves the branch.** It commits patch by patch on a detached
 HEAD in a private worktree, runs the check after every commit from a cleaned
 tree, stops at the first failure, and records the result at
-`refs/review-ready/series/<branch>`. It creates and deletes no branch, so an
+`refs/review-ready/series/<branch>`. The worktree is under the system temp
+directory, not inside the repo: pytest, ruff and dotenv search parent
+directories, and would otherwise find the checkout's `pytest.ini`,
+`conftest.py` or `.env`. It creates and deletes no branch, so an
 interrupted pass leaves the user where they were. When the target has moved
 it rebases the series onto `onto`, checking every commit there too. A
 conflict there is the owner's to resolve (section 1), not an overlay's.

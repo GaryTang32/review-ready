@@ -142,15 +142,18 @@ behaviour-switches.md section 4), not by default.
 
 ## 5. The size gate and `size_ok`
 
-The builder writes `size.md`: per file, the lines the branch changed and the
-lines the series changes, against the fork point, ignoring whitespace and
-blank lines. The series may keep at most `shrink` (default 0.5) in total and
+The builder writes `size.md`: per file, the non-blank lines the branch
+changed and the non-blank lines the series changes, against the fork point,
+ignoring whitespace. The series may keep at most `shrink` (default 0.5) in total and
 in every file the branch changed by 20 lines or more. Branches under 100
 such lines are not gated. A failed gate fails the build, and `--land` refuses
 the series. A stack does not get around it: the gate measures the whole
-series. Nor does cramming: a Python file is marked CRAMMED, and fails, when
-the series has more statements sharing a line (`a = 1; b = 2`, a body on its
-`if` line) or more lines past 120 characters than the branch had.
+series. Nor does cramming: blank lines are not counted, so deleting them
+saves nothing, and a Python file is marked CRAMMED, and fails, when the
+series has more statements sharing a line (`a = 1; b = 2`, a body on its
+`if` line) or more lines past 120 characters than the branch had. When a
+file is exempt, `size.md` also gives the total with the exempt files
+included; quote that one in the PR description.
 
 A file that cannot shrink goes in the plan's `size_ok` with the reason, and
 the reason goes in the PR description. Reasons a reviewer accepts:
