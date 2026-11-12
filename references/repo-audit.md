@@ -60,7 +60,13 @@ Read the report in this order, because each answer narrows the next:
    function called only by dead code is listed with the function that calls
    it: delete the subtree from its head down. "Only tests reach it" is test
    support living in production code, or a feature nothing uses; decide
-   which. A copy cluster is every function alike to one centre function.
+   which. "Imported by X but never used" means the import in X goes in the
+   same patch, or X stops importing. "Imported under try/except" is not a
+   deletion at all: removing the name makes the handler's branch run, so it
+   is a behaviour change and belongs in the open questions. Before deleting
+   a public function nothing calls, search the docs for its name: a tooling
+   module's entry points are often run by hand, and the docs are where that
+   is written down. A copy cluster is every function alike to one centre function.
    Where the copies are the same function (95% alike or more) one copy
    replaces the rest and the lines saved are real. Where they were edited
    after pasting, the figure is an upper bound: the differences have to
@@ -209,7 +215,13 @@ ordering, churn times fan-in, is the first cut. Then:
 2. **Dead switches, dead code, then copies.** Deleting is the safest patch
    there is and makes everything after it smaller. Verify each by hand
    first. Merging copies comes next: where two copies differ, the difference
-   is a parameter or a bug in one of them, and the message says which.
+   is a parameter or a bug in one of them, and the message says which. A
+   copy can move to a shared module without changing behaviour only when
+   the copies are identical as parsed code and read nothing from their own
+   module except names every copy imports the same way; pick the shared
+   module so that no file gains an import it did not have. Prove each swap
+   by parsing the file before and after: only the definition and its import
+   may differ.
 3. **Missing characterization on hot untested functions.** This is the
    enabling work; nothing else in the list is safe without it.
 4. **Architecture: docstrings, then moves, then splits.** Cheap to review,

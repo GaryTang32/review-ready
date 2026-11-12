@@ -36,7 +36,8 @@ Sections of the report:
   the big ones    functions over the length or nesting budget
   untested        public functions no test names or reaches
   dead            what no entry point reaches, by reachability over calls and names used as
-                  values: nothing references it, only dead code does, or only tests do
+                  values: nothing references it, only dead code does, only tests do, or another
+                  file imports it and never uses it (and whether that import is under a try)
   switches        modules that read config, env, flags, or the clock
   dense           short functions with too many paths or a condition with too many terms
   return shapes   functions returning a value on one path and None on another
