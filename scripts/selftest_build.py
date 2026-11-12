@@ -92,7 +92,9 @@ def plan(r, **over):
 def build(r, *flags, **over):
     path = plan(r, **over) if over or not os.path.exists(os.path.join(r, ".review-ready", "plan.json")) \
         else os.path.join(r, ".review-ready", "plan.json")
-    p = subprocess.run([sys.executable, BUILDER, path, *flags], capture_output=True, text=True, env=ENV)
+    # TMPDIR: the builder's worktree goes under the case's own directory and is removed with it.
+    p = subprocess.run([sys.executable, BUILDER, path, *flags], capture_output=True, text=True,
+                       env=dict(ENV, TMPDIR=os.path.dirname(r)))
     return p.returncode, p.stdout + p.stderr
 
 
@@ -206,6 +208,24 @@ def an_absolute_pythonpath_is_caught_by_import_check(tmp):
 
 
 @case
+def a_package_the_series_creates_is_import_checked_once_it_exists(tmp):
+    r = os.path.join(tmp, "n"); os.makedirs(r); sh(r, "git", "init", "-q", "-b", "main", ".")
+    write(r, "README", "empty\n"); sh(r, "git", "add", "-A"); sh(r, "git", "commit", "-qm", "base")
+    sh(r, "git", "checkout", "-qb", "feature")
+    write(r, "pkg/__init__.py", "def up(x):\n    return x.upper()\n"); write(r, "tests/__init__.py", "")
+    write(r, "tests/test_pkg.py", "import unittest\nimport pkg\n\n\nclass T(unittest.TestCase):\n"
+                                  "    def test_up(self):\n        self.assertEqual(pkg.up('a'), 'A')\n")
+    sh(r, "git", "add", "-A"); sh(r, "git", "commit", "-qm", "new package"); sh(r, "git", "checkout", "-q", "main")
+    write(os.path.join(r, ".review-ready"), "msgs/01.txt", MSG)
+    over = {"overlay": None, "expect_fail_before": None,
+            "paths": ["pkg/__init__.py", "tests/__init__.py", "tests/test_pkg.py"]}
+    rc, out = build(r, import_check="pkg", patch0=over)
+    assert rc == 0 and "import_check ok: pkg resolves inside the worktree" in out, out
+    rc, out = build(r, import_check="no_such_pkg", patch0=over)
+    assert rc != 0 and "at the base or after any patch" in out, out
+
+
+@case
 def code_that_does_not_compile_is_never_landed(tmp):
     r = repo(tmp, "j")
     write(os.path.join(r, ".review-ready"), "overlays/01/f.py", "def func1(rows:\n    return 1\n")
@@ -271,11 +291,25 @@ def a_local_target_behind_its_remote_is_refused(tmp):
 
 
 @case
+def the_check_cannot_see_the_checkout_above_it(tmp):
+    # pytest, ruff and dotenv search parent directories. A worktree inside the repo would hand
+    # them the checkout's untracked configuration, here a .env the test goes looking for.
+    r = repo(tmp, "e"); write(r, ".env", "TOKEN=from-the-checkout\n")
+    sh(r, "git", "checkout", "-q", "feature")
+    write(r, "tests/test_f.py", BRANCH_T + "\n    def test_no_env_above(self):\n        import pathlib\n"
+          "        here = pathlib.Path(__file__).resolve()\n"
+          "        self.assertFalse([str(p) for p in here.parents if (p / '.env').exists()])\n")
+    sh(r, "git", "commit", "-qam", "look for a .env"); sh(r, "git", "checkout", "-q", "main")
+    rc, out = build(r)
+    assert rc == 0, out
+
+
+@case
 def it_runs_inside_a_linked_worktree(tmp):
     r = repo(tmp, "p"); plan(r); wt = os.path.join(tmp, "p-wt"); sh(r, "git", "worktree", "add", "-q", wt, "feature")
     shutil.copytree(os.path.join(r, ".review-ready"), os.path.join(wt, ".review-ready"))
     path = os.path.join(wt, ".review-ready", "plan.json")
-    p = subprocess.run([sys.executable, BUILDER, path], capture_output=True, text=True, env=ENV)
+    p = subprocess.run([sys.executable, BUILDER, path], capture_output=True, text=True, env=dict(ENV, TMPDIR=tmp))
     assert p.returncode == 0 and "Traceback" not in p.stderr, p.stdout + p.stderr
     p = subprocess.run([sys.executable, BUILDER, path, "--land"], capture_output=True, text=True, env=ENV)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -410,10 +444,68 @@ def keeping_more_than_half_needs_a_stated_reason(tmp):
 
 
 @case
+def joining_statements_to_halve_the_line_count_does_not_pass_the_gate(tmp):
+    r, path = verbose_branch(tmp, "c1"); k = os.path.join(r, ".review-ready")
+    steps = [f"step_{i} = text" for i in range(118)]
+    write(k, "overlays/02/parse.py", "def parse(text):\n" + "".join(
+        "    " + "; ".join(steps[i:i + 4]) + "\n" for i in range(0, 118, 4)) + "    return text.split(',')\n")
+    p = json.load(open(path)); p["patches"][1] = {"name": "parse", "message": "msgs/02.txt",
+                                                   "overlay": {"parse.py": "overlays/02/parse.py"}}
+    json.dump(p, open(path, "w"))
+    rc, out = build(r)                                   # 31 lines against the branch's 120: under half, and crammed
+    assert rc != 0 and "SIZE GATE FAILED" in out and "CRAMMED" in out and "share a line" in out, out
+    assert build(r, "--land")[0] != 0
+    p["size_ok"] = {"parse.py": "the owner wants these on one line each"}; json.dump(p, open(path, "w"))
+    assert build(r)[0] == 0
+
+
+@case
+def running_lines_together_does_not_pass_the_gate_either(tmp):
+    r, path = verbose_branch(tmp, "c2"); k = os.path.join(r, ".review-ready")
+    names = [f"step_{i}" for i in range(118)]
+    write(k, "overlays/02/parse.py", "def parse(text):\n" + "".join(
+        "    " + " = ".join(names[i:i + 20]) + " = text\n" for i in range(0, 118, 20)) + "    return text.split(',')\n")
+    p = json.load(open(path)); p["patches"][1] = {"name": "parse", "message": "msgs/02.txt",
+                                                   "overlay": {"parse.py": "overlays/02/parse.py"}}
+    json.dump(p, open(path, "w"))
+    rc, out = build(r)                                   # 7 lines, each one statement, each far past 120 characters
+    assert rc != 0 and "CRAMMED" in out and "characters" in out, out
+
+
+@case
+def deleting_blank_lines_does_not_pass_the_gate(tmp):
+    r = repo(tmp, "c3"); k = os.path.join(r, ".review-ready")
+    steps = [f"    step_{i} = text\n" for i in range(120)]
+    sh(r, "git", "checkout", "-q", "feature")
+    write(r, "parse.py", "def parse(text):\n" + "\n\n".join(steps) + "    return text.split(',')\n")
+    sh(r, "git", "add", "parse.py"); sh(r, "git", "commit", "-qm", "parser"); sh(r, "git", "checkout", "-q", "main")
+    write(k, "overlays/02/parse.py", "def parse(text):\n" + "".join(steps) + "    return text.split(',')\n")
+    write(k, "msgs/02.txt", MSG.replace("count the rows of a generator", "add parse()"))
+    path = plan(r); p = json.load(open(path))
+    p["patches"].append({"name": "parse", "message": "msgs/02.txt", "overlay": {"parse.py": "overlays/02/parse.py"}})
+    json.dump(p, open(path, "w"))
+    rc, out = build(r)                                   # 122 lines against 360, and every statement is still there
+    assert rc != 0 and "SIZE GATE FAILED" in out and "| `parse.py` | 122 | 122 | OVER" in out, out
+
+
+@case
+def write_mode_holds_each_patch_to_its_budget(tmp):
+    r = repo(tmp, "wb")
+    over = {"paths": None, "expect_fail_before": None, "overlay": {"f.py": "overlays/01/f.py"}}
+    rc, out = build(r, source=None, branch="topic/new", onto=None, base="main", patch0=over)
+    assert rc != 0 and '"budget"' in out and "topic/new" not in sh(r, "git", "branch", "--list"), out
+    rc, out = build(r, source=None, branch="topic/new", onto=None, base="main", patch0=dict(over, budget=1))
+    assert rc != 0 and "against its budget of 1" in out and "topic/new" not in sh(r, "git", "branch", "--list"), out
+    rc, out = build(r, source=None, branch="topic/new", onto=None, base="main",
+                    patch0=dict(over, budget=1, budget_ok="one call site, cannot be split"))
+    assert rc == 0 and "topic/new" in sh(r, "git", "branch", "--list"), out
+
+
+@case
 def write_mode_makes_a_new_branch_and_lands_nothing(tmp):
     r = repo(tmp, "v")
     rc, out = build(r, source=None, branch="topic/new", onto=None, base="main", patch0={"paths": None, "expect_fail_before": None,
-                    "overlay": {"f.py": "overlays/01/f.py"}})
+                    "budget": 20, "overlay": {"f.py": "overlays/01/f.py"}})
     assert rc == 0 and "write mode" in out, out
     assert "len(list(rows))" in sh(r, "git", "show", "topic/new:f.py")
     rc, out = build(r, "--land")

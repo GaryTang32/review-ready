@@ -28,8 +28,8 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: twenty-five situations in scratch repos;
-`repo_map.py --self-test`: the focus map and the whole-tree map, 41 cases).
+(`build_series.py --self-test`: twenty-eight situations in scratch repos;
+`repo_map.py --self-test`: the focus map and the whole-tree map, 43 cases).
 
 ## References: read the one the moment calls for
 
@@ -321,7 +321,9 @@ what it prints:
   explained.
 
 A failed size gate fails the build, and the series cannot land. "It is
-needed" is not a `size_ok` reason.
+needed" is not a `size_ok` reason. A file marked CRAMMED got its line count
+by joining statements or running lines together; write it out and shrink it
+for real.
 
 ## Step 6: the PR description
 
@@ -384,9 +386,11 @@ shrink later. The plan has no `source`; `branch` names the NEW branch the
 series goes to, and each patch is an `overlay` or a `patch`. Implement one
 patch at a time: write it, add it to the plan, run the builder, which
 rebuilds the whole series from the base each time and updates the branch. A
-patch heading past its budget is split or rewritten, not finished big.
-Steps 3 and 5 to 7 apply; there is nothing to land, no size gate (there is
-no branch to measure against), and nothing to undo.
+patch heading past its budget is split or rewritten, not finished big, and
+the builder enforces it: with no branch to measure against, each patch's
+`budget` is the size check. Write mode requires one per patch and stops the
+build when a patch exceeds it, unless `budget_ok` gives the reason. Steps 3
+and 5 to 7 apply; there is nothing to land and nothing to undo.
 
 ## Review mode
 

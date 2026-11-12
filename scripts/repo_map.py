@@ -86,7 +86,6 @@ SWITCH_HINT = re.compile(
     r"\bos\.environ\b|\bgetenv\(|\bload_dotenv\(|argparse|click\.|typer\.|"
     r"\b(config|settings|cfg|CONFIG|SETTINGS)\b|tomllib|tomli|yaml\.|json\.load\(|"
     r"datetime\.(now|utcnow|today)|date\.today|time\.time|random\.|np\.random\.")
-NEST = (ast.If, ast.For, ast.While, ast.Try, ast.AsyncFor)  # `with` is not a decision
 FUNC = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
@@ -95,20 +94,6 @@ def is_test(rel):
     base = os.path.basename(rel)
     return bool(re.search(r"(^|/)(tests?|__tests__)/", rel) or base == "conftest.py"
                 or re.search(r"(^|_)(self)?tests?(_|\.py$)", base))
-
-
-def max_depth(node, d=0):
-    best = d
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, FUNC + (ast.ClassDef,)):
-            continue
-        nd = d
-        if isinstance(child, NEST):
-            chain = (isinstance(node, ast.If) and isinstance(child, ast.If)
-                     and len(node.orelse) == 1 and node.orelse[0] is child)
-            nd = d if chain else d + 1
-        best = max(best, max_depth(child, nd))
-    return best
 
 
 def module_name(rel):
@@ -191,7 +176,7 @@ def analyse(m):
                     name=node.name, qual=qual, cls=cls, line=node.lineno,
                     end=node.end_lineno or node.lineno,
                     length=(node.end_lineno or node.lineno) - node.lineno + 1,
-                    depth=max_depth(node),
+                    depth=cm.max_depth(node) if cm else 0,   # one definition, in code_metrics
                     params=len(node.args.args) + len(node.args.kwonlyargs),
                     private=node.name.startswith("_"),
                     decorators=[ast.unparse(d) for d in node.decorator_list],
@@ -273,24 +258,21 @@ def purpose_of(mod):
 
 
 def layer_depths(ig, rels):
-    """Longest internal import chain below each module. 0 = imports nothing
-    in this tree; higher = further from the leaves."""
-    depth, visiting = {}, set()
+    """Longest internal import chain below each module. 0 = imports nothing in this tree; higher =
+    further from the leaves.
 
-    def go(n):
-        if n in depth:
-            return depth[n]
-        if n in visiting:
-            return 0  # a cycle: reported separately
-        visiting.add(n)
-        d = 1 + max([go(x) for x in ig.get(n, ()) if x in rels] or [-1])
-        visiting.discard(n)
-        depth[n] = d
-        return d
-
-    for r in rels:
-        go(r)
-    return depth
+    Modules that import each other are one group and share one layer. Walking into a cycle gives a
+    number that depends on where the walk entered it, and the walk followed set order, so the same
+    tree could report different layers on two runs.
+    """
+    rels = set(rels)
+    group_of, layer = {}, {}
+    for i, group in enumerate(rewrite_order(ig, sorted(rels))):      # dependencies first
+        below = {d for m in group for d in ig.get(m, ()) if d in rels and d not in group}
+        layer[i] = 1 + max((layer[group_of[d]] for d in below), default=-1)
+        for m in group:
+            group_of[m] = i
+    return {m: layer[i] for m, i in group_of.items()}
 
 
 def call_name(func):
@@ -326,9 +308,10 @@ class ModuleIndex:
 
     By its full name. Else by an unambiguous dotted suffix: `acme.client` finds src/acme/client.py,
     and `code_metrics` finds a script that a sibling imports by bare name. Else, when several
-    modules share the suffix, by the one that sits in the importing file's own directory, which is
-    how `from _common import x` resolves when a script is run from its folder: five experiment
-    folders each with a _common.py are five different modules, and each script means its own.
+    modules share the suffix, by the nearest one at or above the importing file's own directory.
+    That is how `from _common import x` resolves when a script is run from its folder: five
+    experiment folders each with a _common.py are five different modules, and each script means
+    its own. A script one folder down that puts its parent on sys.path means the parent's.
 
     A one-word suffix that is also a standard-library module is that module: `import json` is not
     utils/json.py. A file whose full name is `json` (at the root) still shadows it, as in Python.
@@ -351,12 +334,13 @@ class ModuleIndex:
         rels = self.suffix.get(dotted, ())
         if len(rels) == 1:
             return next(iter(rels))
-        if importer and rels:
-            here = os.path.dirname(importer)
+        here = os.path.dirname(importer) if importer and rels else None
+        while here is not None:                 # the importer's folder, then each folder above it
             path = (here + "/" if here else "") + dotted.replace(".", "/")
-            beside = [r for r in rels if r in (path + ".py", path + "/__init__.py")]
-            if len(beside) == 1:
-                return beside[0]
+            near = [r for r in rels if r in (path + ".py", path + "/__init__.py")]
+            if near:
+                return near[0] if len(near) == 1 else None
+            here = os.path.dirname(here) if here else None
         return None
 
 
@@ -1668,7 +1652,9 @@ SELF_TEST_FULL = {
     "deploy/svc/svc/job.py": "from svc.conf import setting\n\nprint(setting())\n",
     "exp/one/_common.py": "def helper():\n    return 1\n",
     "exp/one/run.py": "from _common import helper\n\nprint(helper())\n",
-    "exp/two/_common.py": "def helper():\n    return 2\n\n\ndef unused_helper():\n    return 3\n",
+    "exp/two/_common.py": "def helper():\n    return 2\n\n\ndef unused_helper():\n    return 3\n\n\n"
+                          "def deep_helper():\n    return 4\n",
+    "exp/two/deep/run.py": "from _common import deep_helper\n\nprint(deep_helper())\n",
     "exp/two/run.py": "from _common import helper\n\nprint(helper())\n",
     "selftest_app.py": "from app.core import process, test_support\n\n\ndef check():\n    assert process({}) == [] and test_support() == 0\n",
 }
@@ -1686,6 +1672,7 @@ def self_test_full():
     order = r["rewrite_order"]
     copies = [c["members"] for c in r["copies"]]
     pos = {rel: i for i, group in enumerate(order) for rel in group}
+    layers = {x["file"]: x["layer"] for x in r["architecture"]}
     return [
         ("nothing calls it: dead", dead.get("app/core.py:orphan_head") == "nothing references it"),
         ("called only by dead code: dead with it",
@@ -1709,6 +1696,9 @@ def self_test_full():
          and r["import_graph"].get("exp/one/run.py") == ["exp/one/_common.py"]
          and r["import_graph"].get("exp/two/run.py") == ["exp/two/_common.py"]),
         ("and the helper neither script imports is dead", dead.get("exp/two/_common.py:unused_helper") == "nothing references it"),
+        ("a script in a subfolder means the nearest _common.py above it",
+         "exp/two/_common.py:deep_helper" not in dead
+         and r["import_graph"].get("exp/two/deep/run.py") == ["exp/two/_common.py"]),
         ("imported by another file and never used: still dead, and the row names the import to remove",
          dead.get("app/core.py:imported_only") == "imported by app/cli.py but never used: remove that import with it"),
         ("imported inside try/except ImportError: the row says deleting it changes which branch runs",
@@ -1728,6 +1718,9 @@ def self_test_full():
         ("one name with two unrelated bodies is not a copy",
          "load" in r["dup_names"] and not any("load" in m for c in copies for m in c)),
         ("modules that import each other are one group", ["app/a.py", "app/b.py"] in order),
+        ("modules in an import cycle share one layer, above what they import and below what imports them",
+         layers["app/a.py"] == layers["app/b.py"] and layers["app/cli.py"] > layers["app/a.py"]
+         and layers["app/handlers.py"] == 0),
         ("dependencies come first in the rewrite order",
          pos["app/core.py"] < pos["app/cli.py"] and pos["app/a.py"] < pos["app/cli.py"]),
     ]

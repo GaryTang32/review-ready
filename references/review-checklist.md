@@ -112,6 +112,11 @@ all of the rest together)
   for one case." Write the case.
 - "`size_ok` says 'needed'." That is not a reason: say which shrink moves
   were tried and what each left, or shrink it.
+- "The gate was met by packing." Read the densest lines against the
+  branch's: three or four operations chained on one line, two calls joined
+  in one assignment, several facts in one `assert`, a comment that said why
+  now gone. Require them written out, even when that puts the file back
+  over half; the count then goes in `size_ok` with that reason.
 
 **Design and taste**
 

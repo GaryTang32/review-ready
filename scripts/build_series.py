@@ -6,7 +6,8 @@ usage: build_series.py PLAN.json            build the series beside the branch
        options: [--restart] [--force] [--keep-worktree] [--no-check] [--dry-run] [--self-test]
 
 Two acts, on purpose. BUILD commits every patch on a detached HEAD in a private
-worktree under <repo>/.review-ready/, runs the check after each commit, and records
+worktree outside the repo (under the system temp directory, so no tool finds the
+checkout's configuration above it), runs the check after each commit, and records
 the result at refs/review-ready/series/<source>. It creates no branch, deletes no
 branch, and never touches the user's branch or checkout, so an interrupted pass
 leaves them exactly where they were. LAND is the single moment the user's branch
@@ -54,7 +55,9 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
       "overlay": {"pipeline/loader.py": "overlays/01/pipeline/loader.py"},  # a version you wrote
       "patch": "hunks/01.patch",                              # a unified diff (git apply --index --recount)
       "check": true,                                          # false skips the check for this patch
-      "budget": 150,                                          # warn when added+deleted exceeds this
+      "budget": 150,                                          # warn when added+deleted exceeds this. Write mode
+                                                              # requires it and stops the build over it, unless
+      "budget_ok": "<reason>",                                # this says why the patch cannot be smaller
       "expect_fail_before": "python3 -m unittest tests.test_loader.LoadPricesTest.test_x",
                                                               # must FAIL on the parent's code and PASS with the patch
       "mutate": {"file": "pipeline/loader.py", "find": "> 0", "replace": ">= 0",
@@ -97,12 +100,15 @@ Gates the builder applies, because each was once a false pass:
 
 The size gate. A series that reproduces the branch line for line has been
 split, not made reviewable. After the build, the lines changed against the fork
-point in source, tests, config and docs, ignoring whitespace and blank lines,
-are compared file by file with the user's branch: the series may keep at most
+point in source, tests, config and docs, not counting blank lines or whitespace
+changes, are compared file by file with the user's branch: the series may keep at most
 `shrink` of them in total and in every file the branch changed by 20 lines or
 more, unless the file is in `size_ok`. A branch under 100 such lines is not
-gated. The table goes to size.md; a failed gate fails the build and --land
-refuses the series. Stacking does not help: the gate measures the whole series.
+gated. A Python file also fails, as CRAMMED, when the series has more lines
+holding two statements, or more lines past 120 characters, than the branch
+had: that halves the line count and nothing else. The table goes to size.md; a
+failed gate fails the build and --land refuses the series. Stacking does not
+help: the gate measures the whole series.
 
 The residual is written next to the plan as residual.patch, as
 `git diff <original> <series>`: a `-` line is something the user's branch had
@@ -112,6 +118,8 @@ equal deferred.md plus the refactors, line for line.
 from __future__ import annotations
 
 import argparse
+import ast
+import hashlib
 import json
 import os
 import re
@@ -120,6 +128,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from audit_diff import classify  # noqa: E402  one definition of "reviewable" for the audit and the gate
@@ -127,6 +136,7 @@ from audit_diff import classify  # noqa: E402  one definition of "reviewable" fo
 SHRINK = 0.5          # the series keeps at most this share of the branch's reviewable lines
 SHRINK_FLOOR = 100    # a branch with fewer reviewable lines is not gated: a 30-line fix is not halved
 FILE_FLOOR = 20       # nor is one file the branch changed by fewer lines
+LONG_LINE = 120       # a line past this that the branch did not have was run together to save lines
 REVIEWED = ("source", "test", "config", "docs", "other")
 
 TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$")
@@ -272,17 +282,41 @@ def check_message(path, idx, sign_off):
 
 
 def reviewable_lines(top, a, b):
-    """{path: lines changed} for the files a reader reviews by eye.
+    """{path: non-blank lines changed} for the files a reader reviews by eye.
 
-    Whitespace and blank lines are ignored on both sides, so pruning churn
-    alone cannot pass the size gate; only less code can.
+    Whitespace changes and blank lines are not counted on either side, so neither dropping
+    churn nor deleting the blank lines between functions passes the size gate; only less code does.
     """
     out = {}
-    for line in git(top, "diff", "--numstat", "--no-renames", "-w", "--ignore-blank-lines", a, b, "--").splitlines():
-        add, dele, path = line.split("\t", 2)
-        if add != "-" and classify(path) in REVIEWED:
-            out[path] = int(add) + int(dele)
+    for line in git(top, "diff", "--numstat", "--no-renames", "-w", a, b, "--").splitlines():
+        add, _, path = line.split("\t", 2)
+        if add == "-" or classify(path) not in REVIEWED:
+            continue
+        diff = git(top, "diff", "-U0", "--no-renames", "-w", a, b, "--", path).splitlines()
+        first = next((i for i, text in enumerate(diff) if text.startswith("@@")), len(diff))
+        out[path] = sum(1 for text in diff[first:] if text[:1] in ("+", "-") and text[1:].strip())
     return out
+
+
+def cramming(top, ref, path):
+    """(statements that share a line with another, lines past LONG_LINE) in a Python file at `ref`.
+
+    The size gate counts lines. Joining statements with `;`, putting a body on its `if` line, or
+    running several lines into one long one halves the count and saves the reader nothing, so the
+    gate compares these two numbers with the branch's and fails a file that gained either.
+    """
+    if not path.endswith(".py"):
+        return 0, 0
+    shown = run(["git", "-C", top, "show", f"{ref}:{path}"], ok=True)
+    try:
+        tree = ast.parse(shown.stdout) if shown.returncode == 0 else None
+    except SyntaxError:
+        tree = None
+    if tree is None:
+        return 0, 0
+    starts = Counter(n.lineno for n in ast.walk(tree) if isinstance(n, ast.stmt))
+    return (sum(c - 1 for c in starts.values() if c > 1),
+            sum(1 for line in shown.stdout.splitlines() if len(line) > LONG_LINE))
 
 
 def size_gate(top, base, original, series, plan):
@@ -303,7 +337,12 @@ def size_gate(top, base, original, series, plan):
             verdict = f"OVER: at most {int(shrink * b)}"
             over.append(path)
         else:
-            verdict = "ok"
+            (joined_b, long_b), (joined_a, long_a) = cramming(top, original, path), cramming(top, series, path)
+            crammed = [f"{joined_a - joined_b} more statement(s) share a line than on the branch"] * (joined_a > joined_b) \
+                + [f"{long_a - long_b} more line(s) run past {LONG_LINE} characters"] * (long_a > long_b)
+            verdict = "CRAMMED: " + ", ".join(crammed) if gated and crammed else "ok"
+            if verdict != "ok":
+                over.append(path)
         rows.append(f"| `{path}` | {b} | {a} | {verdict} |")
     pct = f"{100 * total_a // total_b}%" if total_b else "-"
     if not gated:
@@ -313,12 +352,20 @@ def size_gate(top, base, original, series, plan):
     else:
         result = "passed"
     md = ["# Size: the series against the branch", "",
-          f"Lines changed against the fork point, ignoring whitespace and blank lines, in source, tests, config "
+          f"Non-blank lines changed against the fork point, ignoring whitespace, in source, tests, config "
           f"and docs. The series keeps at most {shrink:.0%} (`shrink`) of the branch: in total, and in every file "
-          f"the branch changed by {FILE_FLOOR} lines or more. A file listed in `size_ok` is exempt, with its reason.",
+          f"the branch changed by {FILE_FLOOR} lines or more. A Python file is CRAMMED when the series has more "
+          f"statements sharing a line, or more lines past {LONG_LINE} characters, than the branch had. A file "
+          f"listed in `size_ok` is exempt, with its reason.",
           "", "| file | branch | series | verdict |", "|---|---:|---:|---|", *rows, "",
           f"Total outside `size_ok`: {total_b} -> {total_a} ({pct}). Gate: **{result}**."]
+    if any(path in before or path in after for path in size_ok):
+        whole_b, whole_a = sum(before.values()), sum(after.values())
+        md[-1] += f" Every file, exempt ones included: {whole_b} -> {whole_a} ({100 * whole_a // max(whole_b, 1)}%)."
     if result == "FAILED":
+        if any("| CRAMMED" in row for row in rows):
+            md += ["", "A CRAMMED file reached its line count by joining statements or lines: fewer lines, the "
+                   "same amount to read. Write it out one statement to a line and shrink it for real."]
         md += ["", "Rewrite each OVER file smaller (SKILL.md step 3, references/minimal-code.md). A file that "
                "truly cannot shrink goes in the plan's `size_ok` with the reason a reviewer would accept, and the "
                "reason goes in the PR description. Splitting into a stack does not change the total."]
@@ -407,6 +454,11 @@ def build(args, plan, plan_dir, resolve):
             sys.exit(f"patch {i} has no paths/delete/overlay/patch")
         if p.get("paths") and not source:
             sys.exit(f"patch {i} uses paths but the plan has no source branch; use overlay or patch in write mode")
+        if not source and not (isinstance(p.get("budget"), int) and p["budget"] > 0):
+            sys.exit(f'patch {i} has no "budget". Write mode has no branch to measure the series against, so each '
+                     "patch states the lines (added plus deleted) it may take, and the build holds it to that.")
+        if "budget_ok" in p and not str(p["budget_ok"]).strip():
+            sys.exit(f'patch {i}: "budget_ok" needs the reason the patch is over its budget')
     stack = plan.get("stack") or []
     ends = [s.get("through") for s in stack]
     if stack and (ends != sorted(set(ends)) or not all(isinstance(e, int) and 1 <= e < len(patches) for e in ends)):
@@ -455,7 +507,12 @@ def build(args, plan, plan_dir, resolve):
         with open(exclude, "a") as fh:
             fh.write("\n.review-ready/\n")
 
-    wt = os.path.join(top, ".review-ready", "wt-" + (source or branch).replace("/", "_"))
+    # Outside the repo. pytest, ruff, dotenv and the like look in parent directories for their
+    # configuration; under <repo>/.review-ready/ they would find the checkout's pytest.ini,
+    # conftest.py or .env, and every check would run with settings the series does not contain.
+    wt = os.path.join(tempfile.gettempdir(), "review-ready-wt", hashlib.sha256(top.encode()).hexdigest()[:12],
+                      (source or branch).replace("/", "_"))
+    os.makedirs(os.path.dirname(wt), exist_ok=True)
     if os.path.exists(wt):
         git(top, "worktree", "remove", "--force", wt, ok=True)
         shutil.rmtree(wt, ignore_errors=True)
@@ -473,7 +530,8 @@ def build(args, plan, plan_dir, resolve):
     if check and not import_check:
         print('warning: no "import_check". Nothing proves the check imports THIS tree and not an editable install '
               "or an absolute PYTHONPATH pointing at the user's checkout.")
-    if import_check and check:
+    def import_resolves():
+        """True once `import_check` imports from inside the worktree; stops when it imports from anywhere else."""
         probe = ("import importlib,sys; m=importlib.import_module(%r); "
                  "sys.stdout.write(getattr(m,'__file__','') or '')" % import_check)
         try:
@@ -484,14 +542,24 @@ def build(args, plan, plan_dir, resolve):
                  f"worktree.\n{NOT_RUN_HELP}")
         where = (r.stdout or "").strip()
         if r.returncode != 0:
-            stop(f"import_check: cannot import {import_check!r} in the worktree with the check's environment "
-                 f"({check_vars or 'no assignments'}):\n{(r.stderr or '').strip()[-400:]}\n"
-                 "On a src layout the check needs PYTHONPATH=src, relative, so it names the worktree's code.")
+            return False, (r.stderr or "").strip()[-400:]
         if not os.path.realpath(where).startswith(os.path.realpath(wt) + os.sep):
             stop(f"import_check FAILED: {import_check!r} resolves to\n  {where}\nwhich is outside the worktree\n  {wt}\n"
                  "Every check would test a tree this series never touched: an absolute PYTHONPATH (the user's "
                  "checkout) or an editable install. Use a RELATIVE PYTHONPATH in `check`.")
         print(f"  import_check ok: {import_check} resolves inside the worktree")
+        return True, ""
+
+    # A package the series itself creates cannot import at the base: ask again after each patch.
+    import_pending, import_error = bool(import_check and check), ""
+
+    def ask_import():
+        nonlocal import_pending, import_error
+        if import_pending:
+            resolved, import_error = import_resolves()
+            import_pending = not resolved
+
+    ask_import()
 
     rows, added_by, last_overlay = [], {}, {}
     for i, p in enumerate(patches, 1):
@@ -574,6 +642,7 @@ def build(args, plan, plan_dir, resolve):
         if p.get("author"):
             cmd += ["--author", p["author"]]
         git(wt, *cmd)
+        ask_import()
         ns = git(wt, "show", "--numstat", "--format=", "HEAD")
         add = dele = files = 0
         for line in ns.splitlines():
@@ -632,7 +701,18 @@ def build(args, plan, plan_dir, resolve):
         rows.append((i, subject, files, add, dele, status))
         print(f"  {i:02d}/{len(patches)}  +{add:<5}-{dele:<5} {files:>2} file(s)  check={status:<14} {subject}")
         if p.get("budget") and add + dele > p["budget"]:
-            print(f"warning: patch {i:02d} is {add + dele} lines against a budget of {p['budget']}; split it")
+            if source or p.get("budget_ok"):
+                print(f"warning: patch {i:02d} is {add + dele} lines against a budget of {p['budget']}; split it"
+                      + (f" (kept: {p['budget_ok']})" if p.get("budget_ok") else ""))
+            else:
+                stop(f"\npatch {i:02d} ({name}) is {add + dele} lines against its budget of {p['budget']}. In write "
+                     "mode the budget is the size check: split the patch, or write it smaller "
+                     '(references/minimal-code.md). If it truly cannot be either, give the reason in "budget_ok".')
+
+    if import_pending:
+        stop(f"import_check: cannot import {import_check!r} in the worktree with the check's environment "
+             f"({check_vars or 'no assignments'}), at the base or after any patch:\n{import_error}\n"
+             "On a src layout the check needs PYTHONPATH=src, relative, so it names the worktree's code.")
 
     series_tip = sha(wt, "HEAD")
     shas = git(wt, "rev-list", "--reverse", f"{base}..HEAD").split()
@@ -708,7 +788,10 @@ def build(args, plan, plan_dir, resolve):
         if f.endswith(".patch"):
             os.remove(os.path.join(out_dir, f))
     git(wt, "format-patch", "-q", "-o", out_dir, f"{landed_on}..HEAD")
-    git(top, "worktree", "remove", "--force", wt, ok=True) if not args.keep_worktree else None
+    if not args.keep_worktree:
+        git(top, "worktree", "remove", "--force", wt, ok=True)
+        if not os.listdir(os.path.dirname(wt)):
+            os.rmdir(os.path.dirname(wt))
     git(top, "worktree", "prune")
 
     print(f"\nbuilt {len(rows)} patch(es), +{sum(r[3] for r in rows)}/-{sum(r[4] for r in rows)}; "
@@ -731,7 +814,7 @@ def build(args, plan, plan_dir, resolve):
             print("\nresidual: none (the series reproduces the branch exactly)")
         with open(os.path.join(plan_dir, "size-gate.json"), "w") as fh:
             json.dump({"series": series_tip, "passed": size_passed}, fh)
-        print("\n" + "\n".join(l for l in size_md.splitlines() if "| OVER" in l or l.startswith("Total outside")))
+        print("\n" + "\n".join(l for l in size_md.splitlines() if "| OVER" in l or "| CRAMMED" in l or l.startswith("Total outside")))
         print(f"\n{source} has NOT moved. The series is at refs/review-ready/series/{source}: review it there "
               f"(git log {landed_on}..refs/review-ready/series/{source})" + (
                   f", and when the verdict is ACK:\n  python3 {os.path.abspath(__file__)} {os.path.abspath(args.plan)} "

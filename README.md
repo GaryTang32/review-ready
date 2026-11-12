@@ -51,7 +51,7 @@ a branch you already have.
 ## Your branch is safe
 
 The whole pass happens *beside* your branch. The series is built on a detached
-HEAD in a private worktree and kept in a ref; no branch is created or deleted;
+HEAD in a private worktree outside the repo and kept in a ref; no branch is created or deleted;
 your checkout is never touched. If the session dies half way, you are exactly
 where you started.
 
@@ -119,20 +119,24 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 25 whole situations in scratch repositories |
+| `build_series.py --self-test` | 31 whole situations in scratch repositories |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |
 | `comment_audit.py --self-test` | 17, eight of which must find nothing |
-| `repo_map.py --self-test` | 41: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
+| `repo_map.py --self-test` | 43: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts
 it in a state that once went wrong, and asserts on the exit code, the output
-and the resulting git state. 22 of the 25 are the residue of a real defect
-found by review or by a run. The other three pin the size gate: a verbatim
-series cannot land, a rewritten one can, and keeping more than half needs a
-stated reason.
+and the resulting git state. 24 of the 31 are the residue of a real defect
+found by review or by a run; the latest two are a package that the series
+itself creates, and a check that could see the checkout's configuration in
+the directory above it. Six pin the size gate: a verbatim series cannot
+land, a rewritten one can, keeping more than half needs a stated reason,
+and a series that joins statements, runs lines together or deletes blank
+lines to halve its line count fails. One holds write mode to each patch's
+budget.
 
 ## Documentation
 
@@ -147,9 +151,17 @@ Graded 21/21 and 26/26 on two fixtures with planted defects, and run against a
 7,760-line production tree. Honest limits, stated in full in the guide:
 
 - **Python only.** The taste rules generalise; the scripts do not.
-- **The size gate counts lines, not quality.** Halving a file by cramming
-  it passes the gate. The maintainer pass is what NAKs that ("clever"), and
-  `size_ok` exists for files that truly cannot shrink.
+- **The size gate counts lines, not quality.** It fails a Python file that
+  reached its count by joining statements onto one line or running lines
+  past 120 characters, but dense, clever code of normal shape still passes.
+  The maintainer pass is what NAKs that ("clever"), and `size_ok` exists for
+  files that truly cannot shrink. This is not hypothetical: on the first
+  real agent-written branch the pass was run on, the first rewrite reached
+  half per file by chaining calls, and the maintainer pass rejected it as
+  packed. Two reviews later the series kept 55% of the branch's lines: the
+  module at three quarters of its length with four bug fixes the branch did
+  not have, and twice the tests, because the branch's own missed all four.
+  Half is the target for padding, not for a branch that is short and wrong.
 - **Call resolution is a heuristic**, so every dead-code claim is conservative
   and the count of unresolved calls is printed beside it.
 - **It cannot judge whether your problem statement is right.** If the spec is
