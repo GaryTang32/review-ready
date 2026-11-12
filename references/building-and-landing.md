@@ -71,7 +71,11 @@ package and its tests. Call resolution is the same heuristic as the full map:
 a name defined once in the tree is taken to be that definition, so a claim
 that something is used once or never is checked by reading before it is
 acted on. The report says how many plain-name calls in the changed code it
-could not place. Run it again at the series head after the rewrite, if you
+could not place. Its "never called" rows are the whole-tree map's dead list
+for what the branch added, so each carries the same reason: nothing
+references it, only dead code calls it, or another file imports it, in which
+case the import goes too, or, under a try/except, removing it changes which
+branch runs. Run it again at the series head after the rewrite, if you
 want to see what the series still adds and whether anything single-use
 remains.
 
