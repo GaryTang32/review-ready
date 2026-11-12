@@ -1473,11 +1473,19 @@ def focus_map(repo, base, head, src_dirs):
     if fork.returncode:
         sys.exit(f"no merge base for {base} and {head}")
     fork = fork.stdout.strip()
-    with tempfile.TemporaryDirectory() as th, tempfile.TemporaryDirectory() as tb:
+    ahead = subprocess.run(["git", "-C", repo, "rev-list", "--count", f"{fork}..{base}"], capture_output=True, text=True)
+    moved = int(ahead.stdout.strip() or 0)
+    with tempfile.TemporaryDirectory() as th, tempfile.TemporaryDirectory() as tb, tempfile.TemporaryDirectory() as tt:
         export_commit(repo, head, th)
         export_commit(repo, fork, tb)
         mods, old = parse_repo(th, src_dirs), parse_repo(tb, src_dirs)
         eps = entry_points(th, mods)
+        landed = {}
+        if moved:
+            parsed = len(UNPARSED)
+            export_commit(repo, base, tt)
+            landed = parse_repo(tt, src_dirs)
+            del UNPARSED[parsed:]                 # the report's "could not parse" list is about the head
     ep_names = {e[0] for e in eps}
     lines = changed_lines(repo, fork, head)
     edges, _unresolved = build_graph(mods)
@@ -1494,10 +1502,19 @@ def focus_map(repo, base, head, src_dirs):
     old_shapes, old_sh = fingerprints(old)
     old_fp = {fp: key for key, fp in old_shapes.items() if still(key)}
     old_sh = {key: sh for key, sh in old_sh.items() if still(key)}
+    # The series lands on the target, so a definition the target gained after the fork is also one
+    # the tree already has, although the branch has never seen it.
+    gained = lambda k: k[0] not in old or k[1] not in old[k[0]].defs   # noqa: E731
+    target_shapes, target_sh = fingerprints(landed)
+    for key, fp in target_shapes.items():
+        if gained(key):
+            old_fp.setdefault(fp, key)
+    old_sh.update({key: sh for key, sh in target_sh.items() if gained(key)})
+    since_fork = {f"{rel}:{qual}" for rel, qual in set(target_shapes) | set(target_sh) if gained((rel, qual))}
     refs = sum((m.refs for m in mods.values() if not m.is_test), Counter())
     placed = {(src_rel, caller, line) for src_rel, caller, _r, _q, line in edges}
 
-    r = dict(fork=fork, head=head, changed=len(changed), inline=[], unused=[], test_only=[], dupes=[],
+    r = dict(fork=fork, head=head, target=base, moved=moved, changed=len(changed), inline=[], unused=[], test_only=[], dupes=[],
              one_method=[], functions=[], unresolved=0, unparsed=list(UNPARSED))
     for key in changed:
         rel, qual = key
@@ -1506,6 +1523,8 @@ def focus_map(repo, base, head, src_dirs):
         tests = [c for c in sites[key] if mods[c[0]].is_test]
         if is_new(rel, qual):
             for group, finding in addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_names, dead):
+                if group == "dupes":
+                    finding["landed"] = finding["shape"] in since_fork
                 r[group].append(finding)
         node = func_node(mods[rel], d) if d["kind"] != "class" else None
         if node is None:
@@ -1530,6 +1549,9 @@ def render_focus(r):
          f"something is unused or used once is only as good as the resolver, and calls it could not place are "
          f"counted, not dropped: {r['unresolved']} plain-name call(s) in the changed code it could not "
          f"place.", ""]
+    if r.get("moved"):
+        L += [f"`{r['target']}` has moved {r['moved']} commit(s) since the fork. What the branch adds is also compared "
+              "with the functions the target gained in them, which the branch has never seen.", ""]
     if r["unparsed"]:
         L += ["**Could not parse, so blind to:** " + ", ".join(f"`{u[0]}`" for u in r["unparsed"]), ""]
     L += ["## Act on these first", ""]
@@ -1544,6 +1566,7 @@ def render_focus(r):
          lambda x: f"`{x['where']}` ({x['tests']} test call(s))"),
         ("Added, and the tree already has it: reuse the original (move 4)", r["dupes"],
          lambda x: f"`{x['where']}`" + (f": {x['alike']:.0%} like `{x['shape']}`" if x["shape"] else "")
+                   + (", which the target gained after the fork" if x.get("landed") else "")
                    + (f": same name as {', '.join(f'`{n}`' for n in x['name'])}" if x["name"] else "")),
     ]
     for title, items, fmt in groups:
@@ -1594,7 +1617,9 @@ SELF_TEST_BRANCH = {
                      "        if row not in seen:\n            seen.add(row)\n            kept.append(row)\n"
                      "    return kept\n\n\ndef never_called():\n    return 1\n\n\ndef only_tested():\n    return 2\n\n\n"
                      "def dead_head():\n    return dead_leaf()\n\n\ndef dead_leaf():\n    return 5\n\n\n"
-                     "def imported_unused():\n    return 6\n\n\ndef optional():\n    return 7\n",
+                     "def imported_unused():\n    return 6\n\n\ndef optional():\n    return 7\n\n\n"
+                     "def mean_length(rows):\n    total = 0\n    count = 0\n    for row in rows:\n        if row is not None:\n"
+                     "            total += len(row)\n            count += 1\n    return total / count if count else 0\n",
     "pkg/pipeline.py": "from pkg.loader import imported_unused, load\n\n\ndef run(path):\n    return len(load(path))\n",
     "pkg/cli.py": "from pkg.pipeline import run\n\ntry:\n    from pkg.loader import optional\nexcept ImportError:\n"
                   "    optional = None\n\n\ndef main():\n    run('in.csv')\n\n\nif __name__ == '__main__':\n    main()\n",
@@ -1746,6 +1771,10 @@ def self_test():
         git("checkout", "-qb", "feature")
         write(SELF_TEST_BRANCH); git("add", "-A"); git("commit", "-qm", "feature")
         git("checkout", "-q", "main")
+        write({"pkg/stats.py": "def average_size(items):\n    size = 0\n    seen = 0\n    for item in items:\n"
+                               "        if item is not None:\n            size += len(item)\n            seen += 1\n"
+                               "    return size / seen if seen else 0\n"})
+        git("add", "-A"); git("commit", "-qm", "main moves on")
         write({"pkg/loader.py": "def checkout_only():\n    return 0\n"})      # uncommitted, on another branch
         status = subprocess.run(["git", "-C", r, "status", "--porcelain"], capture_output=True, text=True).stdout
         text = render_focus(focus_map(r, "main", "feature", []))
@@ -1756,6 +1785,9 @@ def self_test():
         ("an addition nothing calls is named", "`pkg/loader.py:never_called`"),
         ("an addition only tests call is named", "`pkg/loader.py:only_tested` (1 test call(s))"),
         ("a renamed copy of an existing function is found", "`pkg/loader.py:dedupe`: 100% like `pkg/util.py:unique`"),
+        ("a copy of a function the target gained after the fork is found",
+         "`pkg/loader.py:mean_length`: 100% like `pkg/stats.py:average_size`, which the target gained after the fork"),
+        ("a moved target is said so", "`main` has moved 1 commit(s) since the fork"),
         ("the chain runs from the entry point down",
          "`pkg/cli.py:main` -> `pkg/pipeline.py:run` -> `pkg/loader.py:load`"),
         ("a caller is shown with the line that calls", "`pkg/pipeline.py:5`: `return len(load(path))`"),
