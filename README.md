@@ -157,9 +157,11 @@ Graded 21/21 and 26/26 on two fixtures with planted defects, and run against a
   The maintainer pass is what NAKs that ("clever"), and `size_ok` exists for
   files that truly cannot shrink. This is not hypothetical: on the first
   real agent-written branch the pass was run on, the first rewrite reached
-  half per file by chaining calls, the maintainer pass rejected it as
-  packed, and the reviewed series kept 37% of the branch overall with both
-  code files above half, each for a stated reason.
+  half per file by chaining calls, and the maintainer pass rejected it as
+  packed. Two reviews later the series kept 55% of the branch's lines: the
+  module at three quarters of its length with four bug fixes the branch did
+  not have, and twice the tests, because the branch's own missed all four.
+  Half is the target for padding, not for a branch that is short and wrong.
 - **Call resolution is a heuristic**, so every dead-code claim is conservative
   and the count of unresolved calls is printed beside it.
 - **It cannot judge whether your problem statement is right.** If the spec is
