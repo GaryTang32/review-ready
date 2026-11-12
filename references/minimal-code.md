@@ -148,7 +148,9 @@ blank lines. The series may keep at most `shrink` (default 0.5) in total and
 in every file the branch changed by 20 lines or more. Branches under 100
 such lines are not gated. A failed gate fails the build, and `--land` refuses
 the series. A stack does not get around it: the gate measures the whole
-series.
+series. Nor does cramming: a Python file is marked CRAMMED, and fails, when
+the series has more statements sharing a line (`a = 1; b = 2`, a body on its
+`if` line) or more lines past 120 characters than the branch had.
 
 A file that cannot shrink goes in the plan's `size_ok` with the reason, and
 the reason goes in the PR description. Reasons a reviewer accepts:

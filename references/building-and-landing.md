@@ -117,7 +117,8 @@ Per patch:
 - the message file;
 - how to build it: `paths` (whole files from the user's branch), `overlay`
   (a version you wrote), `patch` (a hand-cut diff) or `delete`;
-- `budget`;
+- `budget`, and in write mode `budget_ok` when a patch cannot fit it (the
+  build stops over budget there; in pre-PR mode it warns);
 - `author`, when the patch is a colleague's work;
 - `expect_fail_before`, a command naming ONE test that must fail on the
   parent's code and pass with the patch;
@@ -165,8 +166,9 @@ Three of them change what you write:
 Read three things it prints:
 
 - **The size table**, also in `$W/size.md`: each OVER file goes back to the
-  rewrite step (minimal-code.md). A failed gate fails the build, and `--land`
-  refuses the series.
+  rewrite step (minimal-code.md), and each CRAMMED file is written out one
+  statement to a line and then shrunk. A failed gate fails the build, and
+  `--land` refuses the series.
 - **The residual**, `git diff <the branch as the user left it> <the series>`.
   A `-` line is something their branch had and the series does not; a `+`
   line is something the series added. It must equal `deferred.md` plus your

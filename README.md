@@ -119,20 +119,21 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 25 whole situations in scratch repositories |
+| `build_series.py --self-test` | 28 whole situations in scratch repositories |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |
 | `comment_audit.py --self-test` | 17, eight of which must find nothing |
-| `repo_map.py --self-test` | 41: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
+| `repo_map.py --self-test` | 43: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts
 it in a state that once went wrong, and asserts on the exit code, the output
-and the resulting git state. 22 of the 25 are the residue of a real defect
-found by review or by a run. The other three pin the size gate: a verbatim
-series cannot land, a rewritten one can, and keeping more than half needs a
-stated reason.
+and the resulting git state. 22 of the 28 are the residue of a real defect
+found by review or by a run. Five pin the size gate: a verbatim series
+cannot land, a rewritten one can, keeping more than half needs a stated
+reason, and a series that joins statements or runs lines together to halve
+its line count fails. One holds write mode to each patch's budget.
 
 ## Documentation
 
@@ -147,9 +148,11 @@ Graded 21/21 and 26/26 on two fixtures with planted defects, and run against a
 7,760-line production tree. Honest limits, stated in full in the guide:
 
 - **Python only.** The taste rules generalise; the scripts do not.
-- **The size gate counts lines, not quality.** Halving a file by cramming
-  it passes the gate. The maintainer pass is what NAKs that ("clever"), and
-  `size_ok` exists for files that truly cannot shrink.
+- **The size gate counts lines, not quality.** It fails a Python file that
+  reached its count by joining statements onto one line or running lines
+  past 120 characters, but dense, clever code of normal shape still passes.
+  The maintainer pass is what NAKs that ("clever"), and `size_ok` exists for
+  files that truly cannot shrink.
 - **Call resolution is a heuristic**, so every dead-code claim is conservative
   and the count of unresolved calls is printed beside it.
 - **It cannot judge whether your problem statement is right.** If the spec is
