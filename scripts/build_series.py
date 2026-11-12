@@ -6,7 +6,8 @@ usage: build_series.py PLAN.json            build the series beside the branch
        options: [--restart] [--force] [--keep-worktree] [--no-check] [--dry-run] [--self-test]
 
 Two acts, on purpose. BUILD commits every patch on a detached HEAD in a private
-worktree under <repo>/.review-ready/, runs the check after each commit, and records
+worktree outside the repo (under the system temp directory, so no tool finds the
+checkout's configuration above it), runs the check after each commit, and records
 the result at refs/review-ready/series/<source>. It creates no branch, deletes no
 branch, and never touches the user's branch or checkout, so an interrupted pass
 leaves them exactly where they were. LAND is the single moment the user's branch
@@ -118,6 +119,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -505,7 +507,12 @@ def build(args, plan, plan_dir, resolve):
         with open(exclude, "a") as fh:
             fh.write("\n.review-ready/\n")
 
-    wt = os.path.join(top, ".review-ready", "wt-" + (source or branch).replace("/", "_"))
+    # Outside the repo. pytest, ruff, dotenv and the like look in parent directories for their
+    # configuration; under <repo>/.review-ready/ they would find the checkout's pytest.ini,
+    # conftest.py or .env, and every check would run with settings the series does not contain.
+    wt = os.path.join(tempfile.gettempdir(), "review-ready-wt", hashlib.sha256(top.encode()).hexdigest()[:12],
+                      (source or branch).replace("/", "_"))
+    os.makedirs(os.path.dirname(wt), exist_ok=True)
     if os.path.exists(wt):
         git(top, "worktree", "remove", "--force", wt, ok=True)
         shutil.rmtree(wt, ignore_errors=True)
@@ -781,7 +788,10 @@ def build(args, plan, plan_dir, resolve):
         if f.endswith(".patch"):
             os.remove(os.path.join(out_dir, f))
     git(wt, "format-patch", "-q", "-o", out_dir, f"{landed_on}..HEAD")
-    git(top, "worktree", "remove", "--force", wt, ok=True) if not args.keep_worktree else None
+    if not args.keep_worktree:
+        git(top, "worktree", "remove", "--force", wt, ok=True)
+        if not os.listdir(os.path.dirname(wt)):
+            os.rmdir(os.path.dirname(wt))
     git(top, "worktree", "prune")
 
     print(f"\nbuilt {len(rows)} patch(es), +{sum(r[3] for r in rows)}/-{sum(r[4] for r in rows)}; "

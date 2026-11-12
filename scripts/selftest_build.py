@@ -92,7 +92,9 @@ def plan(r, **over):
 def build(r, *flags, **over):
     path = plan(r, **over) if over or not os.path.exists(os.path.join(r, ".review-ready", "plan.json")) \
         else os.path.join(r, ".review-ready", "plan.json")
-    p = subprocess.run([sys.executable, BUILDER, path, *flags], capture_output=True, text=True, env=ENV)
+    # TMPDIR: the builder's worktree goes under the case's own directory and is removed with it.
+    p = subprocess.run([sys.executable, BUILDER, path, *flags], capture_output=True, text=True,
+                       env=dict(ENV, TMPDIR=os.path.dirname(r)))
     return p.returncode, p.stdout + p.stderr
 
 
@@ -289,11 +291,25 @@ def a_local_target_behind_its_remote_is_refused(tmp):
 
 
 @case
+def the_check_cannot_see_the_checkout_above_it(tmp):
+    # pytest, ruff and dotenv search parent directories. A worktree inside the repo would hand
+    # them the checkout's untracked configuration, here a .env the test goes looking for.
+    r = repo(tmp, "e"); write(r, ".env", "TOKEN=from-the-checkout\n")
+    sh(r, "git", "checkout", "-q", "feature")
+    write(r, "tests/test_f.py", BRANCH_T + "\n    def test_no_env_above(self):\n        import pathlib\n"
+          "        here = pathlib.Path(__file__).resolve()\n"
+          "        self.assertFalse([str(p) for p in here.parents if (p / '.env').exists()])\n")
+    sh(r, "git", "commit", "-qam", "look for a .env"); sh(r, "git", "checkout", "-q", "main")
+    rc, out = build(r)
+    assert rc == 0, out
+
+
+@case
 def it_runs_inside_a_linked_worktree(tmp):
     r = repo(tmp, "p"); plan(r); wt = os.path.join(tmp, "p-wt"); sh(r, "git", "worktree", "add", "-q", wt, "feature")
     shutil.copytree(os.path.join(r, ".review-ready"), os.path.join(wt, ".review-ready"))
     path = os.path.join(wt, ".review-ready", "plan.json")
-    p = subprocess.run([sys.executable, BUILDER, path], capture_output=True, text=True, env=ENV)
+    p = subprocess.run([sys.executable, BUILDER, path], capture_output=True, text=True, env=dict(ENV, TMPDIR=tmp))
     assert p.returncode == 0 and "Traceback" not in p.stderr, p.stdout + p.stderr
     p = subprocess.run([sys.executable, BUILDER, path, "--land"], capture_output=True, text=True, env=ENV)
     assert p.returncode == 0, p.stdout + p.stderr
