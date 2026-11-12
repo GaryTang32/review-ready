@@ -75,7 +75,9 @@ could not place. Its "never called" rows are the whole-tree map's dead list
 for what the branch added, so each carries the same reason: nothing
 references it, only dead code calls it, or another file imports it, in which
 case the import goes too, or, under a try/except, removing it changes which
-branch runs. Run it again at the series head after the rewrite, if you
+branch runs. "The tree already has it" compares with definitions that existed
+before the branch and still exist at its head, so a function the branch moved
+is not listed as a copy of its old self. Run it again at the series head after the rewrite, if you
 want to see what the series still adds and whether anything single-use
 remains.
 

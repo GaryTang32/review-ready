@@ -1464,8 +1464,8 @@ def addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_name
     score, alike = max(((cm.similarity(mine, sh), k) for k, sh in old_sh.items()), default=(0, None)) if mine else (0, None)
     if not twin and score >= cm.COPY_SIMILARITY:
         twin = alike
-    same = [f"{r}:{q}" for r, om in old.items() if r != rel and not om.is_test
-            for q, x in om.defs.items() if x["name"] == name and x["kind"] != "class"]
+    same = [f"{r}:{q}" for r, om in old.items() if r != rel and not om.is_test and r in mods
+            for q, x in om.defs.items() if x["name"] == name and x["kind"] != "class" and q in mods[r].defs]
     if twin or same:
         out.append(("dupes", dict(where=where, shape=f"{twin[0]}:{twin[1]}" if twin else None,
                                   alike=round(score, 2) if twin == alike else 1.0, name=same[:3])))
@@ -1504,8 +1504,12 @@ def focus_map(repo, base, head, src_dirs):
                if is_new(rel, qual) or (d["kind"] != "class" and any(d["line"] <= n <= d["end"] for n in ls))]
 
     sites, callers_of, callees = index_edges(mods, edges)
+    # "The tree already has it" means the earlier definition is still there at the head. One whose
+    # old home is gone was moved by this branch, not duplicated.
+    still = lambda k: k[0] in mods and k[1] in mods[k[0]].defs   # noqa: E731
     old_shapes, old_sh = fingerprints(old)
-    old_fp = {fp: key for key, fp in old_shapes.items()}
+    old_fp = {fp: key for key, fp in old_shapes.items() if still(key)}
+    old_sh = {key: sh for key, sh in old_sh.items() if still(key)}
     refs = sum((m.refs for m in mods.values() if not m.is_test), Counter())
     placed = {(src_rel, caller, line) for src_rel, caller, _r, _q, line in edges}
 
@@ -1593,6 +1597,9 @@ SELF_TEST_BASE = {
     "pkg/util.py": "def unique(items):\n    seen = set()\n    out = []\n    for item in items:\n"
                    "        if item not in seen:\n            seen.add(item)\n            out.append(item)\n"
                    "    return out\n",
+    "pkg/old_home.py": "def moved(rows):\n    total = 0\n    count = 0\n    for row in rows:\n        if row:\n"
+                       "            total += len(row)\n            count += 1\n    if not count:\n"
+                       "        return 0\n    return total / count\n",
     "tests/__init__.py": "",
     "tests/test_loader.py": "from pkg.loader import load\n\n\ndef test_load():\n    assert load(__file__)\n",
 }
@@ -1608,6 +1615,10 @@ SELF_TEST_BRANCH = {
     "pkg/cli.py": "from pkg.pipeline import run\n\ntry:\n    from pkg.loader import optional\nexcept ImportError:\n"
                   "    optional = None\n\n\ndef main():\n    run('in.csv')\n\n\nif __name__ == '__main__':\n    main()\n",
     "pkg/fmt.py": "class Formatter:\n    def fmt(self, row):\n        return row.strip()\n",
+    "pkg/old_home.py": "KEPT = 1\n",
+    "pkg/new_home.py": "def moved(rows):\n    total = 0\n    count = 0\n    for row in rows:\n        if row:\n"
+                       "            total += len(row)\n            count += 1\n    if not count:\n"
+                       "        return 0\n    return total / count\n",
     "tests/test_loader.py": "from pkg.loader import load, only_tested\n\n\ndef test_load():\n    assert load(__file__)\n"
                             "\n\ndef test_only():\n    assert only_tested() == 2\n",
 }
@@ -1773,6 +1784,8 @@ def self_test():
                      ("an addition imported under try/except says deleting it changes which branch runs",
                       "imported under try/except by pkg/cli.py: deleting it changes which branch runs there"
                       in row("pkg/loader.py:optional")),
+                     ("a function the branch moved to another file is not one the tree already has",
+                      not any(line.startswith("- `pkg/new_home.py:moved`: ") for line in text.splitlines())),
                      ("the checkout is never read", "checkout_only" not in text),
                      ("an unchanged function is not listed", "### `pkg/pipeline.py:run`" not in text),
                      ("nothing in the repo is written", status == after)]:
@@ -1784,7 +1797,7 @@ def self_test():
     for name, ok in full:
         failed += not ok
         print(("ok   " if ok else "FAIL ") + name)
-    print(f"{len(checks) + 6 + len(full)} cases, {failed} failing")
+    print(f"{len(checks) + 7 + len(full)} cases, {failed} failing")
     return 1 if failed else 0
 
 
