@@ -29,7 +29,7 @@ Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
 (`build_series.py --self-test`: twenty-five situations in scratch repos;
-`repo_map.py --self-test`: the focus map and the whole-tree map, 31 cases).
+`repo_map.py --self-test`: the focus map and the whole-tree map, 37 cases).
 
 ## References: read the one the moment calls for
 

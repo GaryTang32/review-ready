@@ -36,7 +36,8 @@ Sections of the report:
   the big ones    functions over the length or nesting budget
   untested        public functions no test names or reaches
   dead            what no entry point reaches, by reachability over calls and names used as
-                  values: nothing references it, only dead code does, or only tests do
+                  values: nothing references it, only dead code does, only tests do, or another
+                  file imports it and never uses it (and whether that import is under a try)
   switches        modules that read config, env, flags, or the clock
   dense           short functions with too many paths or a condition with too many terms
   return shapes   functions returning a value on one path and None on another
@@ -309,34 +310,61 @@ STDLIB = frozenset(getattr(sys, "stdlib_module_names", ()))
 RUNS = (ast.For, ast.While, ast.With, ast.Try, ast.AsyncFor, ast.AsyncWith)
 
 
-def is_external(dotted, index, repo_names):
+def is_external(dotted, modules, repo_names, importer=None):
     """True when an imported name comes from outside this tree: no prefix of it is one of the
     tree's modules, and its first word is either unknown here or a standard-library module."""
     parts = dotted.split(".")
-    if any(".".join(parts[:i]) in index for i in range(1, len(parts) + 1)):
+    if any(modules.find(".".join(parts[:i]), importer) for i in range(1, len(parts) + 1)):
         return False
     return parts[0] not in repo_names or parts[0] in STDLIB
 
 
+class ModuleIndex:
+    """Find a module of this tree by the dotted name an import gives it.
+
+    By its full name. Else by an unambiguous dotted suffix: `acme.client` finds src/acme/client.py,
+    and `code_metrics` finds a script that a sibling imports by bare name. Else, when several
+    modules share the suffix, by the one that sits in the importing file's own directory, which is
+    how `from _common import x` resolves when a script is run from its folder: five experiment
+    folders each with a _common.py are five different modules, and each script means its own.
+
+    A one-word suffix that is also a standard-library module is that module: `import json` is not
+    utils/json.py. A file whose full name is `json` (at the root) still shadows it, as in Python.
+    """
+
+    def __init__(self, mods):
+        self.full = {m.name: rel for rel, m in mods.items()}
+        self.suffix = defaultdict(set)
+        for rel, m in mods.items():
+            parts = m.name.split(".")
+            for i in range(1, len(parts)):
+                self.suffix[".".join(parts[i:])].add(rel)
+
+    def find(self, dotted, importer=None):
+        """The rel of the module `dotted` names when `importer` imports it, or None."""
+        if dotted in self.full:
+            return self.full[dotted]
+        if "." not in dotted and dotted in STDLIB:
+            return None
+        rels = self.suffix.get(dotted, ())
+        if len(rels) == 1:
+            return next(iter(rels))
+        if importer and rels:
+            here = os.path.dirname(importer)
+            path = (here + "/" if here else "") + dotted.replace(".", "/")
+            beside = [r for r in rels if r in (path + ".py", path + "/__init__.py")]
+            if len(beside) == 1:
+                return beside[0]
+        return None
+
+
 def module_index(mods):
-    """Dotted name -> rel, also by every unambiguous dotted suffix: `acme.client` finds
-    src/acme/client.py, and `code_metrics` finds a script that a sibling imports by bare name."""
-    suffix = defaultdict(set)
-    for rel, m in mods.items():
-        parts = m.name.split(".")
-        for i in range(1, len(parts)):
-            suffix[".".join(parts[i:])].add(rel)
-    # A one-word suffix that is also a standard-library module is that module: `import json` is not
-    # utils/json.py. A file whose full name is `json` (at the root) still shadows it, as in Python.
-    index = {name: next(iter(rels)) for name, rels in suffix.items()
-             if len(rels) == 1 and not ("." not in name and name in STDLIB)}
-    index.update({m.name: rel for rel, m in mods.items()})
-    return index
+    return ModuleIndex(mods)
 
 
 def build_graph(mods):
     """Resolve calls to (module rel, qualname). Returns edges and unresolved."""
-    by_module = {name: mods[rel] for name, rel in module_index(mods).items()}
+    modules = module_index(mods)
     # A name imported from a package this tree does not hold is third-party or stdlib: `subprocess.run()`
     # is never this tree's run(), however unique that name is here.
     ours = {seg for m in mods.values() for seg in m.name.split(".")}
@@ -363,14 +391,15 @@ def build_graph(mods):
                 dotted = m.imports[head]
                 full = f"{dotted}.{tail}" if tail else dotted
                 mod_part, _, leaf = full.rpartition(".")
-                if mod_part in by_module and leaf in by_module[mod_part].defs:
-                    hit = (by_module[mod_part].rel, leaf)
-                elif dotted in by_module and tail and tail.split(".")[0] in by_module[dotted].defs:
-                    hit = (by_module[dotted].rel, tail.split(".")[0])
+                owner, pkg = modules.find(mod_part, rel), modules.find(dotted, rel)
+                if owner and leaf in mods[owner].defs:
+                    hit = (owner, leaf)
+                elif pkg and tail and tail.split(".")[0] in mods[pkg].defs:
+                    hit = (pkg, tail.split(".")[0])
             # a name defined in this module
             if hit is None and not tail and head in m.defs:
                 hit = (rel, head)
-            external = head in m.imports and is_external(m.imports[head], by_module, ours)
+            external = head in m.imports and is_external(m.imports[head], modules, ours, rel)
             # unique across the repo. For obj.method() the object's type is
             # unknown, so a leaf that names exactly one definition in the tree
             # is taken as that definition; ambiguous leaves stay unresolved.
@@ -392,18 +421,18 @@ def import_graph(mods):
     """{module: the modules of this tree it imports}.
 
     A dotted import runs every package on the way (`import a.b.c` runs a and a.b), so each prefix
-    is looked up. module_index() finds a module by any unambiguous dotted suffix, which is what
+    is looked up. ModuleIndex finds a module by any unambiguous dotted suffix, which is what
     makes an absolute import under a nested package root resolve: `from svc.conf import X` is
     deploy/svc/svc/conf.py. `from app import b` names the
     module in the alias, so the imported names are looked up as well as the `from` part.
     """
-    index = module_index(mods)
+    modules = module_index(mods)
     g = defaultdict(set)
     for rel, m in mods.items():
         for target in m.import_modules | set(m.imports.values()):
             parts = target.split(".") if target else []
             for i in range(1, len(parts) + 1):
-                hit = index.get(".".join(parts[:i]))
+                hit = modules.find(".".join(parts[:i]), rel)
                 if hit and hit != rel:
                     g[rel].add(hit)
     return g
@@ -705,25 +734,25 @@ def reference_graph(mods, edges):
     attribute, and any string that is an identifier, keeps EVERY definition of that name alive: the
     object's type is unknown, and getattr() and registries name functions by string.
     """
-    by_module = {name: mods[rel] for name, rel in module_index(mods).items()}
+    modules = module_index(mods)
     repo_names = {seg for m in mods.values() for seg in m.name.split(".")}
     by_name = defaultdict(set)
     for rel, m in mods.items():
         for qual, d in m.defs.items():
             by_name[d["name"]].add((rel, qual))
 
-    def imported(dotted):
+    def imported(dotted, importer):
         mod_part, _, leaf = dotted.rpartition(".")
-        hit = by_module.get(mod_part)
-        return {(hit.rel, leaf)} if hit and leaf in hit.defs else set()
+        hit = modules.find(mod_part, importer)
+        return {(hit, leaf)} if hit and leaf in mods[hit].defs else set()
 
     g = defaultdict(set)
     for src_rel, caller, dst_rel, dst_qual, _line in edges:
         g[(src_rel, caller)].add((dst_rel, dst_qual))
     for rel, m in sorted(mods.items()):
         for qual, node in bodies(m):
-            g[(rel, qual)] |= value_refs(m, node, imported, by_name,
-                                         lambda dotted: is_external(dotted, by_module, repo_names))
+            g[(rel, qual)] |= value_refs(m, node, lambda dotted, rel=rel: imported(dotted, rel), by_name,
+                                         lambda dotted, rel=rel: is_external(dotted, modules, repo_names, rel))
         for qual, d in m.defs.items():
             if d["kind"] == "class":
                 g[(rel, qual)] |= class_refs(mods, rel, qual, by_name)
@@ -740,15 +769,60 @@ def reach(g, roots):
     return seen
 
 
+CATCHES_IMPORT = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}
+
+
+def importers_of(mods, modules):
+    """{(rel, name): [(importing rel, guarded)]}: who says `from module import name` for a definition here.
+
+    An import is not a use, but it is a dependency: deleting the definition breaks the importing
+    file. `guarded` is True when the import sits in a `try` whose handlers catch its failure;
+    there a missing name is an expected path, and deleting it silently changes which branch runs.
+    """
+    out = defaultdict(list)
+
+    def visit(m, body, guarded):
+        for node in body:
+            if isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:                                  # relative import, as analyse() resolves it
+                    pkg = m.name.rsplit(".", node.level)[0] if "." in m.name else ""
+                    base = f"{pkg}.{base}".strip(".") if base else pkg
+                target = modules.find(base, m.rel)
+                for a in node.names:
+                    if target and a.name in mods[target].defs:
+                        out[(target, a.name)].append((m.rel, guarded))
+            elif isinstance(node, ast.Try):
+                caught = {ast.unparse(t).split(".")[-1] for h in node.handlers
+                          for t in ([h.type] if h.type is None or not isinstance(h.type, ast.Tuple) else h.type.elts)
+                          if t is not None}
+                bare = any(h.type is None for h in node.handlers)
+                visit(m, node.body, guarded or bare or bool(caught & CATCHES_IMPORT))
+                for part in [h.body for h in node.handlers] + [node.orelse, node.finalbody]:
+                    visit(m, part, guarded)
+            else:
+                for field in ("body", "orelse", "finalbody"):
+                    visit(m, getattr(node, field, None) or [], guarded)
+
+    for m in mods.values():
+        visit(m, m.tree.body, False)
+    return out
+
+
 def find_dead(mods, edges, eps):
     """Definitions no entry point reaches, as rows grouped into dead subtrees.
 
-    Roots: module-level code, anything registered by a decorator, __all__, console scripts and
-    main(). A definition with no path from a root is dead even when something calls it, if the
-    caller is dead too; counting references alone keeps such a subtree alive for ever.
+    Roots: module-level code, anything registered by a decorator, __all__, console scripts,
+    main(), and whatever a package __init__ imports, which is a re-export. A definition with no
+    path from a root is dead even when something calls it, if the caller is dead too; counting
+    references alone keeps such a subtree alive for ever.
+
+    A definition another file imports and never uses is still dead, but its row says so: the
+    import has to go with it, and under a `try` its removal changes which branch runs.
     """
     g = reference_graph(mods, edges)
-    index = module_index(mods)
+    modules = module_index(mods)
+    imported_by = importers_of(mods, modules)
     prod = {(rel, q) for rel, m in mods.items() if not m.is_test for q in m.defs}
     roots = {(rel, None) for rel, m in mods.items() if not m.is_test}
     for rel, qual in prod:
@@ -758,8 +832,10 @@ def find_dead(mods, edges, eps):
             roots.add((rel, qual))
     for where, _how in eps:                       # console scripts: "pkg.mod:func"
         modname, _, fn = where.partition(":")
-        if fn and modname in index:
-            roots.add((index[modname], fn))
+        if fn and modules.find(modname):
+            roots.add((modules.find(modname), fn))
+    roots |= {key for key, users in imported_by.items()
+              if any(os.path.basename(u) == "__init__.py" and not mods[u].is_test for u, _g in users)}
     live = reach(g, roots)
     tested = reach(g, {(rel, None) for rel, m in mods.items() if m.is_test}
                    | {(rel, q) for rel, m in mods.items() if m.is_test for q in m.defs})
@@ -773,8 +849,12 @@ def find_dead(mods, edges, eps):
     for rel, qual in sorted(dead):
         d = mods[rel].defs[qual]
         above = sorted(f"{r}:{q}" for r, q in callers[(rel, qual)])
-        why = ("only tests reach it" if (rel, qual) in tested else
-               f"reached only from dead code: {above[0]}" if above else "nothing references it")
+        users = sorted(imported_by.get((rel, qual), []))
+        guarded = [u for u, g_ in users if g_]
+        why = (f"imported under try/except by {guarded[0]}: deleting it changes which branch runs there" if guarded
+               else "only tests reach it" if (rel, qual) in tested
+               else f"imported by {users[0][0]} but never used: remove that import with it" if users
+               else f"reached only from dead code: {above[0]}" if above else "nothing references it")
         rows.append(dict(file=rel, qual=qual, line=d["line"], kind=d["kind"], private=d["private"],
                          lines=d["length"], why=why, head=not above))
     return rows
@@ -930,10 +1010,16 @@ def analyse_repo(root, src_dirs, top):
                 risks[(group, name)].append((rel, ln, text))
     dup_names = {n: sorted(set(v)) for n, v in same_name.items() if len(set(v)) > 1}
     # Copies by similarity: the shape hash only finds bodies that are identical once renamed.
+    def encloses(a, b):
+        """True when one function sits inside the other: a nested function is most of its parent's
+        text, which makes the pair look like a copy and is not one."""
+        return a[0] == b[0] and (a[2] <= b[2] < a[2] + lengths[a] or b[2] <= a[2] < b[2] + lengths[b])
+
+    pairs = [p for p in cm.near_copies(shingled) if not encloses(p[1], p[2])] if cm else []
     copies = [dict(similarity=low, members=[f"{r_}:{n_} (line {l_})" for r_, n_, l_ in members],
                    exact=low >= cm.COPY_EXACT,
                    removable=sum(lengths[k] for k in members) - max(lengths[k] for k in members))
-              for low, members in (cm.copy_clusters(cm.near_copies(shingled)) if cm else [])]
+              for low, members in (cm.copy_clusters(pairs) if cm else [])]
     copies.sort(key=lambda c: -c["removable"])
     in_copy = {(r_, n_) for c in copies for r_, n_ in (x.split(" (")[0].split(":") for x in c["members"])}
     dup_shapes = [v for k, v in prints.items() if len(v) > 1 and not k.startswith("test:")
@@ -1223,7 +1309,9 @@ def render(r, top):
           "No entry point reaches these: not module-level code, a registered or exported name, a",
           "console script, or anything those call or name. One reached only from dead code is dead",
           "with it, so delete a subtree from its head down. \"Only tests reach it\" is test support",
-          "living in production code, or a feature nothing uses. A name is kept alive by any",
+          "living in production code, or a feature nothing uses. One another file imports and never",
+          "uses takes that import with it; under a try/except, removing it changes which branch",
+          "runs, so that is a behaviour change, not a deletion. A name is kept alive by any",
           "attribute or string that spells it, so this list errs towards silence; still check each",
           "against a plugin, a template or a caller outside this tree before deleting.", "",
           "| file | name | line | kind | lines | why |", "|---|---|---:|---|---:|---|"]
@@ -1514,15 +1602,23 @@ DEPTH = ("def {name}(node, d=0):\n    best = d\n    for child in children(node):
          "            continue\n        {var} = d\n        if isinstance(child, NEST):\n            {var} = d + 1\n"
          "        best = max(best, {name}(child, {var}))\n    return best\n")
 SELF_TEST_FULL = {
-    "app/__init__.py": "",
-    "app/cli.py": "import subprocess\nfrom app import a, b, handlers as h\nfrom app.core import process as run_it\n"
-                  "from app.registry import Registry, Stack, Worker\n\n\ndef main():\n    subprocess.run(['true'])\n"
-                  "    table = {'a': h.on_a, 'd': a.walk_depth, 'e': b.nesting_depth, 'l': (a.load, b.load), 'm': a.Marker}\n"
+    "app/__init__.py": "from app.handlers import exported\n",
+    "app/cli.py": "import subprocess\nfrom app import a, b, handlers as h\n"
+                  "from app.core import imported_only, make_counter, process as run_it\n"
+                  "from app.registry import Registry, Stack, Worker\n\ntry:\n    from app.handlers import optional_feature\n"
+                  "except ImportError:\n    optional_feature = None\n\n\ndef main():\n    subprocess.run(['true'])\n"
+                  "    table = {'a': h.on_a, 'd': a.walk_depth, 'e': b.nesting_depth, 'l': (a.load, b.load), 'm': a.Marker, 'c': make_counter}\n"
                   "    Registry().dispatch('on_b')\n    Worker().start()\n    Stack().append(1)\n    return run_it(table)\n\n\n"
                   "if __name__ == '__main__':\n    main()\n",
-    "app/handlers.py": "def on_a(x):\n    return x\n\n\ndef on_b(x):\n    return x\n",
+    "app/handlers.py": "def on_a(x):\n    return x\n\n\ndef on_b(x):\n    return x\n\n\ndef exported():\n    return 1\n"
+                       "\n\ndef optional_feature():\n    return 1\n",
     "app/legacy.py": "def on_a(x):\n    return -x\n",
     "app/core.py": "def process(table):\n    return sorted(table)\n\n\ndef run(cmd):\n    return cmd\n\n\n"
+                   "def make_counter(limit):\n    def count(rows):\n        total = 0\n        for row in rows:\n"
+                   "            if row is None:\n                continue\n            if len(row) > limit:\n"
+                   "                total += limit\n            else:\n                total += len(row)\n"
+                   "        return total\n    return count\n\n\n"
+                   "def imported_only():\n    return 3\n\n\n"
                    "def orphan_head():\n    return orphan_leaf() + 1\n\n\ndef orphan_leaf():\n    return 1\n\n\n"
                    "def test_support():\n    return 0\n",
     "app/registry.py": "import threading\nfrom contextlib import contextmanager\n\n\ndef register(fn):\n    return fn\n\n\n"
@@ -1544,6 +1640,10 @@ SELF_TEST_FULL = {
     "deploy/svc/svc/__init__.py": "",
     "deploy/svc/svc/conf.py": "import json\nimport logging\n\nlogging.basicConfig()\n\n\ndef setting():\n    return json.dumps({})\n",
     "deploy/svc/svc/job.py": "from svc.conf import setting\n\nprint(setting())\n",
+    "exp/one/_common.py": "def helper():\n    return 1\n",
+    "exp/one/run.py": "from _common import helper\n\nprint(helper())\n",
+    "exp/two/_common.py": "def helper():\n    return 2\n\n\ndef unused_helper():\n    return 3\n",
+    "exp/two/run.py": "from _common import helper\n\nprint(helper())\n",
     "selftest_app.py": "from app.core import process, test_support\n\n\ndef check():\n    assert process({}) == [] and test_support() == 0\n",
 }
 
@@ -1578,7 +1678,18 @@ def self_test_full():
         ("`import json` is the standard library, not app/json.py, whose dumps() is dead",
          dead.get("app/json.py:dumps") == "nothing references it"
          and "app/json.py" not in r["import_graph"].get("deploy/svc/svc/conf.py", [])),
-        ("nothing else is reported dead", len(dead) == 9),
+        ("two folders each with a _common.py: each script imports its own, so both helpers are alive",
+         not any(k.endswith("_common.py:helper") for k in dead)
+         and r["import_graph"].get("exp/one/run.py") == ["exp/one/_common.py"]
+         and r["import_graph"].get("exp/two/run.py") == ["exp/two/_common.py"]),
+        ("and the helper neither script imports is dead", dead.get("exp/two/_common.py:unused_helper") == "nothing references it"),
+        ("imported by another file and never used: still dead, and the row names the import to remove",
+         dead.get("app/core.py:imported_only") == "imported by app/cli.py but never used: remove that import with it"),
+        ("imported inside try/except ImportError: the row says deleting it changes which branch runs",
+         dead.get("app/handlers.py:optional_feature")
+         == "imported under try/except by app/cli.py: deleting it changes which branch runs there"),
+        ("a name a package __init__ imports is re-exported, so it is alive", "app/handlers.py:exported" not in dead),
+        ("nothing else is reported dead", len(dead) == 12),
         ("an absolute import under a nested package root resolves",
          "deploy/svc/svc/conf.py" in r["import_graph"].get("deploy/svc/svc/job.py", [])),
         ("a file that runs at top level and nothing imports is an entry point",
@@ -1586,6 +1697,8 @@ def self_test_full():
         ("an imported module with a setup call at the top is not",
          not any(e[0] == "deploy/svc/svc/conf.py" for e in r["entry_points"])),
         ("an edited, renamed copy is found", len(copies) == 1 and len(copies[0]) == 2 and "walk_depth" in copies[0][0]),
+        ("a function is not a copy of the function nested inside it",
+         not any("make_counter" in m or ":count " in m for c in copies for m in c)),
         ("one name with two unrelated bodies is not a copy",
          "load" in r["dup_names"] and not any("load" in m for c in copies for m in c)),
         ("modules that import each other are one group", ["app/a.py", "app/b.py"] in order),
