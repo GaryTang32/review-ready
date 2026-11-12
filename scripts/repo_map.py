@@ -8,7 +8,9 @@ usage: repo_map.py [--repo PATH] [--src DIR ...] [--md FILE] [--json FILE] [--to
 --focus maps only the code a branch changes and its neighbours, read at HEAD
 from git (never the working tree), against the fork point of BASE and HEAD:
   act on these first  functions and classes the branch added that are used once
-                  (inline them), never called, called only by tests, or already
+                  (inline them), reached by no entry point (with the whole-tree
+                  map's reason: nothing references it, only dead code calls it,
+                  or another file imports it), reached only by tests, or already
                   in the tree under another name or the same shape; classes
                   with one method
   changed functions  for each: the call chain up from it, its callers with the
@@ -1431,19 +1433,25 @@ def unplaced_calls(mod, qual, node, placed):
                and c.func.id not in known and (mod.rel, qual, c.lineno) not in placed)
 
 
-def addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_names):
-    """What to do about a function or class the branch added: [(group, finding)]."""
+def addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_names, dead):
+    """What to do about a function or class the branch added: [(group, finding)].
+
+    `dead` is find_dead()'s verdict on the head tree, {key: why}. The focus map used to decide
+    "never called" from call sites alone, which missed an addition called only by another dead
+    addition, and said nothing about a file that imports the name.
+    """
     rel, qual = key
     m, d = mods[rel], mods[rel].defs[qual]
     name, where = d["name"], f"{rel}:{qual}"
+    out = []
+    why = dead.get(key)
+    if why:
+        out.append(("test_only" if why == "only tests reach it" else "unused",
+                    dict(where=where, kind=d["kind"], line=d["line"], tests=len(tests), why=why)))
     if (name.startswith("__") or name == "main" or d["decorators"] or where in ep_names
             or (m.all_exports is not None and name in m.all_exports)):
-        return []
-    out = []
-    if not prod and refs[name] == 0:
-        out.append(("test_only" if tests else "unused", dict(where=where, kind=d["kind"], line=d["line"],
-                                                             tests=len(tests))))
-    elif len(prod) == 1 and refs[name] <= 1 and d["length"] <= INLINE_MAX:
+        return out
+    if not why and len(prod) == 1 and refs[name] <= 1 and d["length"] <= INLINE_MAX:
         out.append(("inline", dict(where=where, kind=d["kind"], length=d["length"], site=f"{prod[0][0]}:{prod[0][2]}")))
     if d["kind"] == "class":
         methods = [q for q, x in m.defs.items() if x["cls"] == qual and not x["name"].startswith("__")]
@@ -1456,8 +1464,8 @@ def addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_name
     score, alike = max(((cm.similarity(mine, sh), k) for k, sh in old_sh.items()), default=(0, None)) if mine else (0, None)
     if not twin and score >= cm.COPY_SIMILARITY:
         twin = alike
-    same = [f"{r}:{q}" for r, om in old.items() if r != rel and not om.is_test
-            for q, x in om.defs.items() if x["name"] == name and x["kind"] != "class"]
+    same = [f"{r}:{q}" for r, om in old.items() if r != rel and not om.is_test and r in mods
+            for q, x in om.defs.items() if x["name"] == name and x["kind"] != "class" and q in mods[r].defs]
     if twin or same:
         out.append(("dupes", dict(where=where, shape=f"{twin[0]}:{twin[1]}" if twin else None,
                                   alike=round(score, 2) if twin == alike else 1.0, name=same[:3])))
@@ -1485,17 +1493,23 @@ def focus_map(repo, base, head, src_dirs):
         export_commit(repo, head, th)
         export_commit(repo, fork, tb)
         mods, old = parse_repo(th, src_dirs), parse_repo(tb, src_dirs)
-        ep_names = {e[0] for e in entry_points(th, mods)}
+        eps = entry_points(th, mods)
+    ep_names = {e[0] for e in eps}
     lines = changed_lines(repo, fork, head)
     edges, _unresolved = build_graph(mods)
+    dead = {(d["file"], d["qual"]): d["why"] for d in find_dead(mods, edges, eps)}
     is_new = lambda rel, qual: rel not in old or qual not in old[rel].defs   # noqa: E731
     changed = [(rel, qual) for rel, ls in lines.items() if rel in mods and not mods[rel].is_test
                for qual, d in mods[rel].defs.items()
                if is_new(rel, qual) or (d["kind"] != "class" and any(d["line"] <= n <= d["end"] for n in ls))]
 
     sites, callers_of, callees = index_edges(mods, edges)
+    # "The tree already has it" means the earlier definition is still there at the head. One whose
+    # old home is gone was moved by this branch, not duplicated.
+    still = lambda k: k[0] in mods and k[1] in mods[k[0]].defs   # noqa: E731
     old_shapes, old_sh = fingerprints(old)
-    old_fp = {fp: key for key, fp in old_shapes.items()}
+    old_fp = {fp: key for key, fp in old_shapes.items() if still(key)}
+    old_sh = {key: sh for key, sh in old_sh.items() if still(key)}
     refs = sum((m.refs for m in mods.values() if not m.is_test), Counter())
     placed = {(src_rel, caller, line) for src_rel, caller, _r, _q, line in edges}
 
@@ -1507,7 +1521,7 @@ def focus_map(repo, base, head, src_dirs):
         prod = [c for c in sites[key] if not mods[c[0]].is_test]
         tests = [c for c in sites[key] if mods[c[0]].is_test]
         if is_new(rel, qual):
-            for group, finding in addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_names):
+            for group, finding in addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_names, dead):
                 r[group].append(finding)
         node = func_node(mods[rel], d) if d["kind"] != "class" else None
         if node is None:
@@ -1541,7 +1555,7 @@ def render_focus(r):
         ("Classes with at most one method: a function (move 1)", r["one_method"],
          lambda x: f"`{x['where']}`" + (f": only `{x['methods'][0]}`" if x["methods"] else ": no methods")),
         ("Added and never called: prune it, or it lands with its first caller", r["unused"],
-         lambda x: f"`{x['where']}` ({x['kind']}, line {x['line']})"),
+         lambda x: f"`{x['where']}` ({x['kind']}, line {x['line']}): {x['why']}"),
         ("Added and called only by tests: dead in production", r["test_only"],
          lambda x: f"`{x['where']}` ({x['tests']} test call(s))"),
         ("Added, and the tree already has it: reuse the original (move 4)", r["dupes"],
@@ -1583,6 +1597,9 @@ SELF_TEST_BASE = {
     "pkg/util.py": "def unique(items):\n    seen = set()\n    out = []\n    for item in items:\n"
                    "        if item not in seen:\n            seen.add(item)\n            out.append(item)\n"
                    "    return out\n",
+    "pkg/old_home.py": "def moved(rows):\n    total = 0\n    count = 0\n    for row in rows:\n        if row:\n"
+                       "            total += len(row)\n            count += 1\n    if not count:\n"
+                       "        return 0\n    return total / count\n",
     "tests/__init__.py": "",
     "tests/test_loader.py": "from pkg.loader import load\n\n\ndef test_load():\n    assert load(__file__)\n",
 }
@@ -1591,8 +1608,17 @@ SELF_TEST_BRANCH = {
                      "    return _strip(rows)\n\n\ndef _strip(rows):\n    return [Formatter().fmt(r) for r in rows]\n\n\n"
                      "def dedupe(rows):\n    seen = set()\n    kept = []\n    for row in rows:\n"
                      "        if row not in seen:\n            seen.add(row)\n            kept.append(row)\n"
-                     "    return kept\n\n\ndef never_called():\n    return 1\n\n\ndef only_tested():\n    return 2\n",
+                     "    return kept\n\n\ndef never_called():\n    return 1\n\n\ndef only_tested():\n    return 2\n\n\n"
+                     "def dead_head():\n    return dead_leaf()\n\n\ndef dead_leaf():\n    return 5\n\n\n"
+                     "def imported_unused():\n    return 6\n\n\ndef optional():\n    return 7\n",
+    "pkg/pipeline.py": "from pkg.loader import imported_unused, load\n\n\ndef run(path):\n    return len(load(path))\n",
+    "pkg/cli.py": "from pkg.pipeline import run\n\ntry:\n    from pkg.loader import optional\nexcept ImportError:\n"
+                  "    optional = None\n\n\ndef main():\n    run('in.csv')\n\n\nif __name__ == '__main__':\n    main()\n",
     "pkg/fmt.py": "class Formatter:\n    def fmt(self, row):\n        return row.strip()\n",
+    "pkg/old_home.py": "KEPT = 1\n",
+    "pkg/new_home.py": "def moved(rows):\n    total = 0\n    count = 0\n    for row in rows:\n        if row:\n"
+                       "            total += len(row)\n            count += 1\n    if not count:\n"
+                       "        return 0\n    return total / count\n",
     "tests/test_loader.py": "from pkg.loader import load, only_tested\n\n\ndef test_load():\n    assert load(__file__)\n"
                             "\n\ndef test_only():\n    assert only_tested() == 2\n",
 }
@@ -1747,7 +1773,20 @@ def self_test():
         ok = needle in text
         failed += not ok
         print(("ok   " if ok else "FAIL ") + name)
-    for name, ok in [("the checkout is never read", "checkout_only" not in text),
+    def row(where):
+        return next((line for line in text.splitlines() if line.startswith(f"- `{where}`")), "")
+
+    for name, ok in [("an addition called only by a dead addition is named with its caller",
+                      "reached only from dead code: pkg/loader.py:dead_head" in row("pkg/loader.py:dead_leaf")),
+                     ("an addition another file imports and never uses names the import to remove",
+                      "imported by pkg/pipeline.py but never used: remove that import with it"
+                      in row("pkg/loader.py:imported_unused")),
+                     ("an addition imported under try/except says deleting it changes which branch runs",
+                      "imported under try/except by pkg/cli.py: deleting it changes which branch runs there"
+                      in row("pkg/loader.py:optional")),
+                     ("a function the branch moved to another file is not one the tree already has",
+                      not any(line.startswith("- `pkg/new_home.py:moved`: ") for line in text.splitlines())),
+                     ("the checkout is never read", "checkout_only" not in text),
                      ("an unchanged function is not listed", "### `pkg/pipeline.py:run`" not in text),
                      ("nothing in the repo is written", status == after)]:
         failed += not ok
@@ -1758,7 +1797,7 @@ def self_test():
     for name, ok in full:
         failed += not ok
         print(("ok   " if ok else "FAIL ") + name)
-    print(f"{len(checks) + 3 + len(full)} cases, {failed} failing")
+    print(f"{len(checks) + 7 + len(full)} cases, {failed} failing")
     return 1 if failed else 0
 
 
