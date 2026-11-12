@@ -308,9 +308,10 @@ class ModuleIndex:
 
     By its full name. Else by an unambiguous dotted suffix: `acme.client` finds src/acme/client.py,
     and `code_metrics` finds a script that a sibling imports by bare name. Else, when several
-    modules share the suffix, by the one that sits in the importing file's own directory, which is
-    how `from _common import x` resolves when a script is run from its folder: five experiment
-    folders each with a _common.py are five different modules, and each script means its own.
+    modules share the suffix, by the nearest one at or above the importing file's own directory.
+    That is how `from _common import x` resolves when a script is run from its folder: five
+    experiment folders each with a _common.py are five different modules, and each script means
+    its own. A script one folder down that puts its parent on sys.path means the parent's.
 
     A one-word suffix that is also a standard-library module is that module: `import json` is not
     utils/json.py. A file whose full name is `json` (at the root) still shadows it, as in Python.
@@ -333,12 +334,13 @@ class ModuleIndex:
         rels = self.suffix.get(dotted, ())
         if len(rels) == 1:
             return next(iter(rels))
-        if importer and rels:
-            here = os.path.dirname(importer)
+        here = os.path.dirname(importer) if importer and rels else None
+        while here is not None:                 # the importer's folder, then each folder above it
             path = (here + "/" if here else "") + dotted.replace(".", "/")
-            beside = [r for r in rels if r in (path + ".py", path + "/__init__.py")]
-            if len(beside) == 1:
-                return beside[0]
+            near = [r for r in rels if r in (path + ".py", path + "/__init__.py")]
+            if near:
+                return near[0] if len(near) == 1 else None
+            here = os.path.dirname(here) if here else None
         return None
 
 
@@ -1650,7 +1652,9 @@ SELF_TEST_FULL = {
     "deploy/svc/svc/job.py": "from svc.conf import setting\n\nprint(setting())\n",
     "exp/one/_common.py": "def helper():\n    return 1\n",
     "exp/one/run.py": "from _common import helper\n\nprint(helper())\n",
-    "exp/two/_common.py": "def helper():\n    return 2\n\n\ndef unused_helper():\n    return 3\n",
+    "exp/two/_common.py": "def helper():\n    return 2\n\n\ndef unused_helper():\n    return 3\n\n\n"
+                          "def deep_helper():\n    return 4\n",
+    "exp/two/deep/run.py": "from _common import deep_helper\n\nprint(deep_helper())\n",
     "exp/two/run.py": "from _common import helper\n\nprint(helper())\n",
     "selftest_app.py": "from app.core import process, test_support\n\n\ndef check():\n    assert process({}) == [] and test_support() == 0\n",
 }
@@ -1692,6 +1696,9 @@ def self_test_full():
          and r["import_graph"].get("exp/one/run.py") == ["exp/one/_common.py"]
          and r["import_graph"].get("exp/two/run.py") == ["exp/two/_common.py"]),
         ("and the helper neither script imports is dead", dead.get("exp/two/_common.py:unused_helper") == "nothing references it"),
+        ("a script in a subfolder means the nearest _common.py above it",
+         "exp/two/_common.py:deep_helper" not in dead
+         and r["import_graph"].get("exp/two/deep/run.py") == ["exp/two/_common.py"]),
         ("imported by another file and never used: still dead, and the row names the import to remove",
          dead.get("app/core.py:imported_only") == "imported by app/cli.py but never used: remove that import with it"),
         ("imported inside try/except ImportError: the row says deleting it changes which branch runs",
