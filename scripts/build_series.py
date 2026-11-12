@@ -99,8 +99,8 @@ Gates the builder applies, because each was once a false pass:
 
 The size gate. A series that reproduces the branch line for line has been
 split, not made reviewable. After the build, the lines changed against the fork
-point in source, tests, config and docs, ignoring whitespace and blank lines,
-are compared file by file with the user's branch: the series may keep at most
+point in source, tests, config and docs, not counting blank lines or whitespace
+changes, are compared file by file with the user's branch: the series may keep at most
 `shrink` of them in total and in every file the branch changed by 20 lines or
 more, unless the file is in `size_ok`. A branch under 100 such lines is not
 gated. A Python file also fails, as CRAMMED, when the series has more lines
@@ -280,16 +280,19 @@ def check_message(path, idx, sign_off):
 
 
 def reviewable_lines(top, a, b):
-    """{path: lines changed} for the files a reader reviews by eye.
+    """{path: non-blank lines changed} for the files a reader reviews by eye.
 
-    Whitespace and blank lines are ignored on both sides, so pruning churn
-    alone cannot pass the size gate; only less code can.
+    Whitespace changes and blank lines are not counted on either side, so neither dropping
+    churn nor deleting the blank lines between functions passes the size gate; only less code does.
     """
     out = {}
-    for line in git(top, "diff", "--numstat", "--no-renames", "-w", "--ignore-blank-lines", a, b, "--").splitlines():
-        add, dele, path = line.split("\t", 2)
-        if add != "-" and classify(path) in REVIEWED:
-            out[path] = int(add) + int(dele)
+    for line in git(top, "diff", "--numstat", "--no-renames", "-w", a, b, "--").splitlines():
+        add, _, path = line.split("\t", 2)
+        if add == "-" or classify(path) not in REVIEWED:
+            continue
+        diff = git(top, "diff", "-U0", "--no-renames", "-w", a, b, "--", path).splitlines()
+        first = next((i for i, text in enumerate(diff) if text.startswith("@@")), len(diff))
+        out[path] = sum(1 for text in diff[first:] if text[:1] in ("+", "-") and text[1:].strip())
     return out
 
 
@@ -347,13 +350,16 @@ def size_gate(top, base, original, series, plan):
     else:
         result = "passed"
     md = ["# Size: the series against the branch", "",
-          f"Lines changed against the fork point, ignoring whitespace and blank lines, in source, tests, config "
+          f"Non-blank lines changed against the fork point, ignoring whitespace, in source, tests, config "
           f"and docs. The series keeps at most {shrink:.0%} (`shrink`) of the branch: in total, and in every file "
           f"the branch changed by {FILE_FLOOR} lines or more. A Python file is CRAMMED when the series has more "
           f"statements sharing a line, or more lines past {LONG_LINE} characters, than the branch had. A file "
           f"listed in `size_ok` is exempt, with its reason.",
           "", "| file | branch | series | verdict |", "|---|---:|---:|---|", *rows, "",
           f"Total outside `size_ok`: {total_b} -> {total_a} ({pct}). Gate: **{result}**."]
+    if any(path in before or path in after for path in size_ok):
+        whole_b, whole_a = sum(before.values()), sum(after.values())
+        md[-1] += f" Every file, exempt ones included: {whole_b} -> {whole_a} ({100 * whole_a // max(whole_b, 1)}%)."
     if result == "FAILED":
         if any("| CRAMMED" in row for row in rows):
             md += ["", "A CRAMMED file reached its line count by joining statements or lines: fewer lines, the "

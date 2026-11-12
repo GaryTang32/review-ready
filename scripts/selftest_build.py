@@ -457,6 +457,22 @@ def running_lines_together_does_not_pass_the_gate_either(tmp):
 
 
 @case
+def deleting_blank_lines_does_not_pass_the_gate(tmp):
+    r = repo(tmp, "c3"); k = os.path.join(r, ".review-ready")
+    steps = [f"    step_{i} = text\n" for i in range(120)]
+    sh(r, "git", "checkout", "-q", "feature")
+    write(r, "parse.py", "def parse(text):\n" + "\n\n".join(steps) + "    return text.split(',')\n")
+    sh(r, "git", "add", "parse.py"); sh(r, "git", "commit", "-qm", "parser"); sh(r, "git", "checkout", "-q", "main")
+    write(k, "overlays/02/parse.py", "def parse(text):\n" + "".join(steps) + "    return text.split(',')\n")
+    write(k, "msgs/02.txt", MSG.replace("count the rows of a generator", "add parse()"))
+    path = plan(r); p = json.load(open(path))
+    p["patches"].append({"name": "parse", "message": "msgs/02.txt", "overlay": {"parse.py": "overlays/02/parse.py"}})
+    json.dump(p, open(path, "w"))
+    rc, out = build(r)                                   # 122 lines against 360, and every statement is still there
+    assert rc != 0 and "SIZE GATE FAILED" in out and "| `parse.py` | 122 | 122 | OVER" in out, out
+
+
+@case
 def write_mode_holds_each_patch_to_its_budget(tmp):
     r = repo(tmp, "wb")
     over = {"paths": None, "expect_fail_before": None, "overlay": {"f.py": "overlays/01/f.py"}}
