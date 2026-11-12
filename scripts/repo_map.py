@@ -768,15 +768,60 @@ def reach(g, roots):
     return seen
 
 
+CATCHES_IMPORT = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}
+
+
+def importers_of(mods, modules):
+    """{(rel, name): [(importing rel, guarded)]}: who says `from module import name` for a definition here.
+
+    An import is not a use, but it is a dependency: deleting the definition breaks the importing
+    file. `guarded` is True when the import sits in a `try` whose handlers catch its failure;
+    there a missing name is an expected path, and deleting it silently changes which branch runs.
+    """
+    out = defaultdict(list)
+
+    def visit(m, body, guarded):
+        for node in body:
+            if isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:                                  # relative import, as analyse() resolves it
+                    pkg = m.name.rsplit(".", node.level)[0] if "." in m.name else ""
+                    base = f"{pkg}.{base}".strip(".") if base else pkg
+                target = modules.find(base, m.rel)
+                for a in node.names:
+                    if target and a.name in mods[target].defs:
+                        out[(target, a.name)].append((m.rel, guarded))
+            elif isinstance(node, ast.Try):
+                caught = {ast.unparse(t).split(".")[-1] for h in node.handlers
+                          for t in ([h.type] if h.type is None or not isinstance(h.type, ast.Tuple) else h.type.elts)
+                          if t is not None}
+                bare = any(h.type is None for h in node.handlers)
+                visit(m, node.body, guarded or bare or bool(caught & CATCHES_IMPORT))
+                for part in [h.body for h in node.handlers] + [node.orelse, node.finalbody]:
+                    visit(m, part, guarded)
+            else:
+                for field in ("body", "orelse", "finalbody"):
+                    visit(m, getattr(node, field, None) or [], guarded)
+
+    for m in mods.values():
+        visit(m, m.tree.body, False)
+    return out
+
+
 def find_dead(mods, edges, eps):
     """Definitions no entry point reaches, as rows grouped into dead subtrees.
 
-    Roots: module-level code, anything registered by a decorator, __all__, console scripts and
-    main(). A definition with no path from a root is dead even when something calls it, if the
-    caller is dead too; counting references alone keeps such a subtree alive for ever.
+    Roots: module-level code, anything registered by a decorator, __all__, console scripts,
+    main(), and whatever a package __init__ imports, which is a re-export. A definition with no
+    path from a root is dead even when something calls it, if the caller is dead too; counting
+    references alone keeps such a subtree alive for ever.
+
+    A definition another file imports and never uses is still dead, but its row says so: the
+    import has to go with it, and under a `try` its removal changes which branch runs.
     """
     g = reference_graph(mods, edges)
     modules = module_index(mods)
+    imported_by = importers_of(mods, modules)
     prod = {(rel, q) for rel, m in mods.items() if not m.is_test for q in m.defs}
     roots = {(rel, None) for rel, m in mods.items() if not m.is_test}
     for rel, qual in prod:
@@ -788,6 +833,8 @@ def find_dead(mods, edges, eps):
         modname, _, fn = where.partition(":")
         if fn and modules.find(modname):
             roots.add((modules.find(modname), fn))
+    roots |= {key for key, users in imported_by.items()
+              if any(os.path.basename(u) == "__init__.py" and not mods[u].is_test for u, _g in users)}
     live = reach(g, roots)
     tested = reach(g, {(rel, None) for rel, m in mods.items() if m.is_test}
                    | {(rel, q) for rel, m in mods.items() if m.is_test for q in m.defs})
@@ -801,8 +848,12 @@ def find_dead(mods, edges, eps):
     for rel, qual in sorted(dead):
         d = mods[rel].defs[qual]
         above = sorted(f"{r}:{q}" for r, q in callers[(rel, qual)])
-        why = ("only tests reach it" if (rel, qual) in tested else
-               f"reached only from dead code: {above[0]}" if above else "nothing references it")
+        users = sorted(imported_by.get((rel, qual), []))
+        guarded = [u for u, g_ in users if g_]
+        why = (f"imported under try/except by {guarded[0]}: deleting it changes which branch runs there" if guarded
+               else "only tests reach it" if (rel, qual) in tested
+               else f"imported by {users[0][0]} but never used: remove that import with it" if users
+               else f"reached only from dead code: {above[0]}" if above else "nothing references it")
         rows.append(dict(file=rel, qual=qual, line=d["line"], kind=d["kind"], private=d["private"],
                          lines=d["length"], why=why, head=not above))
     return rows
@@ -1257,7 +1308,9 @@ def render(r, top):
           "No entry point reaches these: not module-level code, a registered or exported name, a",
           "console script, or anything those call or name. One reached only from dead code is dead",
           "with it, so delete a subtree from its head down. \"Only tests reach it\" is test support",
-          "living in production code, or a feature nothing uses. A name is kept alive by any",
+          "living in production code, or a feature nothing uses. One another file imports and never",
+          "uses takes that import with it; under a try/except, removing it changes which branch",
+          "runs, so that is a behaviour change, not a deletion. A name is kept alive by any",
           "attribute or string that spells it, so this list errs towards silence; still check each",
           "against a plugin, a template or a caller outside this tree before deleting.", "",
           "| file | name | line | kind | lines | why |", "|---|---|---:|---|---:|---|"]
@@ -1548,19 +1601,23 @@ DEPTH = ("def {name}(node, d=0):\n    best = d\n    for child in children(node):
          "            continue\n        {var} = d\n        if isinstance(child, NEST):\n            {var} = d + 1\n"
          "        best = max(best, {name}(child, {var}))\n    return best\n")
 SELF_TEST_FULL = {
-    "app/__init__.py": "",
-    "app/cli.py": "import subprocess\nfrom app import a, b, handlers as h\nfrom app.core import make_counter, process as run_it\n"
-                  "from app.registry import Registry, Stack, Worker\n\n\ndef main():\n    subprocess.run(['true'])\n"
+    "app/__init__.py": "from app.handlers import exported\n",
+    "app/cli.py": "import subprocess\nfrom app import a, b, handlers as h\n"
+                  "from app.core import imported_only, make_counter, process as run_it\n"
+                  "from app.registry import Registry, Stack, Worker\n\ntry:\n    from app.handlers import optional_feature\n"
+                  "except ImportError:\n    optional_feature = None\n\n\ndef main():\n    subprocess.run(['true'])\n"
                   "    table = {'a': h.on_a, 'd': a.walk_depth, 'e': b.nesting_depth, 'l': (a.load, b.load), 'm': a.Marker, 'c': make_counter}\n"
                   "    Registry().dispatch('on_b')\n    Worker().start()\n    Stack().append(1)\n    return run_it(table)\n\n\n"
                   "if __name__ == '__main__':\n    main()\n",
-    "app/handlers.py": "def on_a(x):\n    return x\n\n\ndef on_b(x):\n    return x\n",
+    "app/handlers.py": "def on_a(x):\n    return x\n\n\ndef on_b(x):\n    return x\n\n\ndef exported():\n    return 1\n"
+                       "\n\ndef optional_feature():\n    return 1\n",
     "app/legacy.py": "def on_a(x):\n    return -x\n",
     "app/core.py": "def process(table):\n    return sorted(table)\n\n\ndef run(cmd):\n    return cmd\n\n\n"
                    "def make_counter(limit):\n    def count(rows):\n        total = 0\n        for row in rows:\n"
                    "            if row is None:\n                continue\n            if len(row) > limit:\n"
                    "                total += limit\n            else:\n                total += len(row)\n"
                    "        return total\n    return count\n\n\n"
+                   "def imported_only():\n    return 3\n\n\n"
                    "def orphan_head():\n    return orphan_leaf() + 1\n\n\ndef orphan_leaf():\n    return 1\n\n\n"
                    "def test_support():\n    return 0\n",
     "app/registry.py": "import threading\nfrom contextlib import contextmanager\n\n\ndef register(fn):\n    return fn\n\n\n"
@@ -1625,7 +1682,13 @@ def self_test_full():
          and r["import_graph"].get("exp/one/run.py") == ["exp/one/_common.py"]
          and r["import_graph"].get("exp/two/run.py") == ["exp/two/_common.py"]),
         ("and the helper neither script imports is dead", dead.get("exp/two/_common.py:unused_helper") == "nothing references it"),
-        ("nothing else is reported dead", len(dead) == 10),
+        ("imported by another file and never used: still dead, and the row names the import to remove",
+         dead.get("app/core.py:imported_only") == "imported by app/cli.py but never used: remove that import with it"),
+        ("imported inside try/except ImportError: the row says deleting it changes which branch runs",
+         dead.get("app/handlers.py:optional_feature")
+         == "imported under try/except by app/cli.py: deleting it changes which branch runs there"),
+        ("a name a package __init__ imports is re-exported, so it is alive", "app/handlers.py:exported" not in dead),
+        ("nothing else is reported dead", len(dead) == 12),
         ("an absolute import under a nested package root resolves",
          "deploy/svc/svc/conf.py" in r["import_graph"].get("deploy/svc/svc/job.py", [])),
         ("a file that runs at top level and nothing imports is an entry point",
