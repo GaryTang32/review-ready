@@ -958,10 +958,16 @@ def analyse_repo(root, src_dirs, top):
                 risks[(group, name)].append((rel, ln, text))
     dup_names = {n: sorted(set(v)) for n, v in same_name.items() if len(set(v)) > 1}
     # Copies by similarity: the shape hash only finds bodies that are identical once renamed.
+    def encloses(a, b):
+        """True when one function sits inside the other: a nested function is most of its parent's
+        text, which makes the pair look like a copy and is not one."""
+        return a[0] == b[0] and (a[2] <= b[2] < a[2] + lengths[a] or b[2] <= a[2] < b[2] + lengths[b])
+
+    pairs = [p for p in cm.near_copies(shingled) if not encloses(p[1], p[2])] if cm else []
     copies = [dict(similarity=low, members=[f"{r_}:{n_} (line {l_})" for r_, n_, l_ in members],
                    exact=low >= cm.COPY_EXACT,
                    removable=sum(lengths[k] for k in members) - max(lengths[k] for k in members))
-              for low, members in (cm.copy_clusters(cm.near_copies(shingled)) if cm else [])]
+              for low, members in (cm.copy_clusters(pairs) if cm else [])]
     copies.sort(key=lambda c: -c["removable"])
     in_copy = {(r_, n_) for c in copies for r_, n_ in (x.split(" (")[0].split(":") for x in c["members"])}
     dup_shapes = [v for k, v in prints.items() if len(v) > 1 and not k.startswith("test:")
@@ -1543,14 +1549,18 @@ DEPTH = ("def {name}(node, d=0):\n    best = d\n    for child in children(node):
          "        best = max(best, {name}(child, {var}))\n    return best\n")
 SELF_TEST_FULL = {
     "app/__init__.py": "",
-    "app/cli.py": "import subprocess\nfrom app import a, b, handlers as h\nfrom app.core import process as run_it\n"
+    "app/cli.py": "import subprocess\nfrom app import a, b, handlers as h\nfrom app.core import make_counter, process as run_it\n"
                   "from app.registry import Registry, Stack, Worker\n\n\ndef main():\n    subprocess.run(['true'])\n"
-                  "    table = {'a': h.on_a, 'd': a.walk_depth, 'e': b.nesting_depth, 'l': (a.load, b.load), 'm': a.Marker}\n"
+                  "    table = {'a': h.on_a, 'd': a.walk_depth, 'e': b.nesting_depth, 'l': (a.load, b.load), 'm': a.Marker, 'c': make_counter}\n"
                   "    Registry().dispatch('on_b')\n    Worker().start()\n    Stack().append(1)\n    return run_it(table)\n\n\n"
                   "if __name__ == '__main__':\n    main()\n",
     "app/handlers.py": "def on_a(x):\n    return x\n\n\ndef on_b(x):\n    return x\n",
     "app/legacy.py": "def on_a(x):\n    return -x\n",
     "app/core.py": "def process(table):\n    return sorted(table)\n\n\ndef run(cmd):\n    return cmd\n\n\n"
+                   "def make_counter(limit):\n    def count(rows):\n        total = 0\n        for row in rows:\n"
+                   "            if row is None:\n                continue\n            if len(row) > limit:\n"
+                   "                total += limit\n            else:\n                total += len(row)\n"
+                   "        return total\n    return count\n\n\n"
                    "def orphan_head():\n    return orphan_leaf() + 1\n\n\ndef orphan_leaf():\n    return 1\n\n\n"
                    "def test_support():\n    return 0\n",
     "app/registry.py": "import threading\nfrom contextlib import contextmanager\n\n\ndef register(fn):\n    return fn\n\n\n"
@@ -1623,6 +1633,8 @@ def self_test_full():
         ("an imported module with a setup call at the top is not",
          not any(e[0] == "deploy/svc/svc/conf.py" for e in r["entry_points"])),
         ("an edited, renamed copy is found", len(copies) == 1 and len(copies[0]) == 2 and "walk_depth" in copies[0][0]),
+        ("a function is not a copy of the function nested inside it",
+         not any("make_counter" in m or ":count " in m for c in copies for m in c)),
         ("one name with two unrelated bodies is not a copy",
          "load" in r["dup_names"] and not any("load" in m for c in copies for m in c)),
         ("modules that import each other are one group", ["app/a.py", "app/b.py"] in order),
