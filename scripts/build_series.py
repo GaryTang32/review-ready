@@ -517,7 +517,8 @@ def build(args, plan, plan_dir, resolve):
     if check and not import_check:
         print('warning: no "import_check". Nothing proves the check imports THIS tree and not an editable install '
               "or an absolute PYTHONPATH pointing at the user's checkout.")
-    if import_check and check:
+    def import_resolves():
+        """True once `import_check` imports from inside the worktree; stops when it imports from anywhere else."""
         probe = ("import importlib,sys; m=importlib.import_module(%r); "
                  "sys.stdout.write(getattr(m,'__file__','') or '')" % import_check)
         try:
@@ -528,14 +529,24 @@ def build(args, plan, plan_dir, resolve):
                  f"worktree.\n{NOT_RUN_HELP}")
         where = (r.stdout or "").strip()
         if r.returncode != 0:
-            stop(f"import_check: cannot import {import_check!r} in the worktree with the check's environment "
-                 f"({check_vars or 'no assignments'}):\n{(r.stderr or '').strip()[-400:]}\n"
-                 "On a src layout the check needs PYTHONPATH=src, relative, so it names the worktree's code.")
+            return False, (r.stderr or "").strip()[-400:]
         if not os.path.realpath(where).startswith(os.path.realpath(wt) + os.sep):
             stop(f"import_check FAILED: {import_check!r} resolves to\n  {where}\nwhich is outside the worktree\n  {wt}\n"
                  "Every check would test a tree this series never touched: an absolute PYTHONPATH (the user's "
                  "checkout) or an editable install. Use a RELATIVE PYTHONPATH in `check`.")
         print(f"  import_check ok: {import_check} resolves inside the worktree")
+        return True, ""
+
+    # A package the series itself creates cannot import at the base: ask again after each patch.
+    import_pending, import_error = bool(import_check and check), ""
+
+    def ask_import():
+        nonlocal import_pending, import_error
+        if import_pending:
+            resolved, import_error = import_resolves()
+            import_pending = not resolved
+
+    ask_import()
 
     rows, added_by, last_overlay = [], {}, {}
     for i, p in enumerate(patches, 1):
@@ -618,6 +629,7 @@ def build(args, plan, plan_dir, resolve):
         if p.get("author"):
             cmd += ["--author", p["author"]]
         git(wt, *cmd)
+        ask_import()
         ns = git(wt, "show", "--numstat", "--format=", "HEAD")
         add = dele = files = 0
         for line in ns.splitlines():
@@ -683,6 +695,11 @@ def build(args, plan, plan_dir, resolve):
                 stop(f"\npatch {i:02d} ({name}) is {add + dele} lines against its budget of {p['budget']}. In write "
                      "mode the budget is the size check: split the patch, or write it smaller "
                      '(references/minimal-code.md). If it truly cannot be either, give the reason in "budget_ok".')
+
+    if import_pending:
+        stop(f"import_check: cannot import {import_check!r} in the worktree with the check's environment "
+             f"({check_vars or 'no assignments'}), at the base or after any patch:\n{import_error}\n"
+             "On a src layout the check needs PYTHONPATH=src, relative, so it names the worktree's code.")
 
     series_tip = sha(wt, "HEAD")
     shas = git(wt, "rev-list", "--reverse", f"{base}..HEAD").split()

@@ -206,6 +206,24 @@ def an_absolute_pythonpath_is_caught_by_import_check(tmp):
 
 
 @case
+def a_package_the_series_creates_is_import_checked_once_it_exists(tmp):
+    r = os.path.join(tmp, "n"); os.makedirs(r); sh(r, "git", "init", "-q", "-b", "main", ".")
+    write(r, "README", "empty\n"); sh(r, "git", "add", "-A"); sh(r, "git", "commit", "-qm", "base")
+    sh(r, "git", "checkout", "-qb", "feature")
+    write(r, "pkg/__init__.py", "def up(x):\n    return x.upper()\n"); write(r, "tests/__init__.py", "")
+    write(r, "tests/test_pkg.py", "import unittest\nimport pkg\n\n\nclass T(unittest.TestCase):\n"
+                                  "    def test_up(self):\n        self.assertEqual(pkg.up('a'), 'A')\n")
+    sh(r, "git", "add", "-A"); sh(r, "git", "commit", "-qm", "new package"); sh(r, "git", "checkout", "-q", "main")
+    write(os.path.join(r, ".review-ready"), "msgs/01.txt", MSG)
+    over = {"overlay": None, "expect_fail_before": None,
+            "paths": ["pkg/__init__.py", "tests/__init__.py", "tests/test_pkg.py"]}
+    rc, out = build(r, import_check="pkg", patch0=over)
+    assert rc == 0 and "import_check ok: pkg resolves inside the worktree" in out, out
+    rc, out = build(r, import_check="no_such_pkg", patch0=over)
+    assert rc != 0 and "at the base or after any patch" in out, out
+
+
+@case
 def code_that_does_not_compile_is_never_landed(tmp):
     r = repo(tmp, "j")
     write(os.path.join(r, ".review-ready"), "overlays/01/f.py", "def func1(rows:\n    return 1\n")
