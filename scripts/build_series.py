@@ -54,7 +54,9 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
       "overlay": {"pipeline/loader.py": "overlays/01/pipeline/loader.py"},  # a version you wrote
       "patch": "hunks/01.patch",                              # a unified diff (git apply --index --recount)
       "check": true,                                          # false skips the check for this patch
-      "budget": 150,                                          # warn when added+deleted exceeds this
+      "budget": 150,                                          # warn when added+deleted exceeds this. Write mode
+                                                              # requires it and stops the build over it, unless
+      "budget_ok": "<reason>",                                # this says why the patch cannot be smaller
       "expect_fail_before": "python3 -m unittest tests.test_loader.LoadPricesTest.test_x",
                                                               # must FAIL on the parent's code and PASS with the patch
       "mutate": {"file": "pipeline/loader.py", "find": "> 0", "replace": ">= 0",
@@ -444,6 +446,11 @@ def build(args, plan, plan_dir, resolve):
             sys.exit(f"patch {i} has no paths/delete/overlay/patch")
         if p.get("paths") and not source:
             sys.exit(f"patch {i} uses paths but the plan has no source branch; use overlay or patch in write mode")
+        if not source and not (isinstance(p.get("budget"), int) and p["budget"] > 0):
+            sys.exit(f'patch {i} has no "budget". Write mode has no branch to measure the series against, so each '
+                     "patch states the lines (added plus deleted) it may take, and the build holds it to that.")
+        if "budget_ok" in p and not str(p["budget_ok"]).strip():
+            sys.exit(f'patch {i}: "budget_ok" needs the reason the patch is over its budget')
     stack = plan.get("stack") or []
     ends = [s.get("through") for s in stack]
     if stack and (ends != sorted(set(ends)) or not all(isinstance(e, int) and 1 <= e < len(patches) for e in ends)):
@@ -669,7 +676,13 @@ def build(args, plan, plan_dir, resolve):
         rows.append((i, subject, files, add, dele, status))
         print(f"  {i:02d}/{len(patches)}  +{add:<5}-{dele:<5} {files:>2} file(s)  check={status:<14} {subject}")
         if p.get("budget") and add + dele > p["budget"]:
-            print(f"warning: patch {i:02d} is {add + dele} lines against a budget of {p['budget']}; split it")
+            if source or p.get("budget_ok"):
+                print(f"warning: patch {i:02d} is {add + dele} lines against a budget of {p['budget']}; split it"
+                      + (f" (kept: {p['budget_ok']})" if p.get("budget_ok") else ""))
+            else:
+                stop(f"\npatch {i:02d} ({name}) is {add + dele} lines against its budget of {p['budget']}. In write "
+                     "mode the budget is the size check: split the patch, or write it smaller "
+                     '(references/minimal-code.md). If it truly cannot be either, give the reason in "budget_ok".')
 
     series_tip = sha(wt, "HEAD")
     shas = git(wt, "rev-list", "--reverse", f"{base}..HEAD").split()

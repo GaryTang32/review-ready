@@ -439,10 +439,23 @@ def running_lines_together_does_not_pass_the_gate_either(tmp):
 
 
 @case
+def write_mode_holds_each_patch_to_its_budget(tmp):
+    r = repo(tmp, "wb")
+    over = {"paths": None, "expect_fail_before": None, "overlay": {"f.py": "overlays/01/f.py"}}
+    rc, out = build(r, source=None, branch="topic/new", onto=None, base="main", patch0=over)
+    assert rc != 0 and '"budget"' in out and "topic/new" not in sh(r, "git", "branch", "--list"), out
+    rc, out = build(r, source=None, branch="topic/new", onto=None, base="main", patch0=dict(over, budget=1))
+    assert rc != 0 and "against its budget of 1" in out and "topic/new" not in sh(r, "git", "branch", "--list"), out
+    rc, out = build(r, source=None, branch="topic/new", onto=None, base="main",
+                    patch0=dict(over, budget=1, budget_ok="one call site, cannot be split"))
+    assert rc == 0 and "topic/new" in sh(r, "git", "branch", "--list"), out
+
+
+@case
 def write_mode_makes_a_new_branch_and_lands_nothing(tmp):
     r = repo(tmp, "v")
     rc, out = build(r, source=None, branch="topic/new", onto=None, base="main", patch0={"paths": None, "expect_fail_before": None,
-                    "overlay": {"f.py": "overlays/01/f.py"}})
+                    "budget": 20, "overlay": {"f.py": "overlays/01/f.py"}})
     assert rc == 0 and "write mode" in out, out
     assert "len(list(rows))" in sh(r, "git", "show", "topic/new:f.py")
     rc, out = build(r, "--land")
