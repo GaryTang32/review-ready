@@ -258,24 +258,21 @@ def purpose_of(mod):
 
 
 def layer_depths(ig, rels):
-    """Longest internal import chain below each module. 0 = imports nothing
-    in this tree; higher = further from the leaves."""
-    depth, visiting = {}, set()
+    """Longest internal import chain below each module. 0 = imports nothing in this tree; higher =
+    further from the leaves.
 
-    def go(n):
-        if n in depth:
-            return depth[n]
-        if n in visiting:
-            return 0  # a cycle: reported separately
-        visiting.add(n)
-        d = 1 + max([go(x) for x in ig.get(n, ()) if x in rels] or [-1])
-        visiting.discard(n)
-        depth[n] = d
-        return d
-
-    for r in rels:
-        go(r)
-    return depth
+    Modules that import each other are one group and share one layer. Walking into a cycle gives a
+    number that depends on where the walk entered it, and the walk followed set order, so the same
+    tree could report different layers on two runs.
+    """
+    rels = set(rels)
+    group_of, layer = {}, {}
+    for i, group in enumerate(rewrite_order(ig, sorted(rels))):      # dependencies first
+        below = {d for m in group for d in ig.get(m, ()) if d in rels and d not in group}
+        layer[i] = 1 + max((layer[group_of[d]] for d in below), default=-1)
+        for m in group:
+            group_of[m] = i
+    return {m: layer[i] for m, i in group_of.items()}
 
 
 def call_name(func):
@@ -1671,6 +1668,7 @@ def self_test_full():
     order = r["rewrite_order"]
     copies = [c["members"] for c in r["copies"]]
     pos = {rel: i for i, group in enumerate(order) for rel in group}
+    layers = {x["file"]: x["layer"] for x in r["architecture"]}
     return [
         ("nothing calls it: dead", dead.get("app/core.py:orphan_head") == "nothing references it"),
         ("called only by dead code: dead with it",
@@ -1713,6 +1711,9 @@ def self_test_full():
         ("one name with two unrelated bodies is not a copy",
          "load" in r["dup_names"] and not any("load" in m for c in copies for m in c)),
         ("modules that import each other are one group", ["app/a.py", "app/b.py"] in order),
+        ("modules in an import cycle share one layer, above what they import and below what imports them",
+         layers["app/a.py"] == layers["app/b.py"] and layers["app/cli.py"] > layers["app/a.py"]
+         and layers["app/handlers.py"] == 0),
         ("dependencies come first in the rewrite order",
          pos["app/core.py"] < pos["app/cli.py"] and pos["app/a.py"] < pos["app/cli.py"]),
     ]
