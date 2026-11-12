@@ -238,6 +238,32 @@ def numstat_commit(repo, sha, *extra):
     return parse_numstat(git(repo, "show", "--numstat", "--format=", "-M", *extra, sha, "--"))
 
 
+REVIEWED = ("source", "test", "config", "docs", "other")
+
+
+def reviewable_lines(repo, a, b, renames=True):
+    """{path: non-blank lines changed} between two commits, in the files a reader reviews by eye.
+
+    Whitespace changes and blank lines are not counted. git's own --ignore-blank-lines drops a
+    change only when the whole hunk is blank, so every blank line of a new file would count; this
+    reads the zero-context diff instead. It is the one count the audit and the size gate share.
+    """
+    out, path, in_hunk = defaultdict(int), None, False
+    for line in git(repo, "diff", "-U0", "-w", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
+                    "-M" if renames else "--no-renames", a, b, "--").splitlines():
+        if line.startswith("diff --git "):
+            path, in_hunk = None, False
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif not in_hunk and line.startswith(("--- ", "+++ ")):
+            name = line[4:].rstrip("\t").strip('"')
+            if name != "/dev/null":                    # a deleted file keeps the name from its `---` line
+                path = name[2:]
+        elif in_hunk and path and line[:1] in ("+", "-") and line[1:].strip() and classify(path) in REVIEWED:
+            out[path] += 1
+    return dict(out)
+
+
 def added_lines(repo, base, head, paths):
     """(path, new_lineno, text) for every added line, plus the set of touched new-side lines per file."""
     added, touched = [], defaultdict(set)
@@ -562,8 +588,8 @@ def audit(repo, base, head, check=None, tip_only=False, timeout=900, import_chec
             c = (a + d) - (aw + dw)
             if c > 0:
                 churn[path] = c
-    reviewable = sum(v["added"] + v["deleted"] for k, v in by_class.items()
-                     if k in ("source", "test", "config", "docs", "other"))
+    by_file = reviewable_lines(repo, base, head)
+    reviewable = sum(by_file.values())
     noise = sum(v["added"] + v["deleted"] for k, v in by_class.items()
                 if k in ("generated", "notebook", "data", "binary"))
 
@@ -730,8 +756,7 @@ def audit(repo, base, head, check=None, tip_only=False, timeout=900, import_chec
         hints.append(f"{reviewable} reviewable lines: at {PATCH_BUDGET} lines a patch that is at least "
                      f"{math.ceil(reviewable / PATCH_BUDGET)} patches.")
     brought = set(git(repo, "diff", "--name-only", "--diff-filter=A", base, head, "--").splitlines())
-    in_new = sum(a + d for p_, (a, d, b_) in files.items()
-                 if p_ in brought and not b_ and classify(p_) in ("source", "test", "config", "docs", "other"))
+    in_new = sum(n for p_, n in by_file.items() if p_ in brought)
     if reviewable > PR_BUDGET:
         hints.append(f"{reviewable} reviewable lines is more than one sitting ({PR_BUDGET}): {in_new} in new files, "
                      f"{reviewable - in_new} in edits to existing code. Rewrite before you split: AI-written code is "
@@ -898,7 +923,8 @@ def render(r):
         v = r["by_class"].get(cls)
         if v:
             L.append(f"| {cls} | {v['files']} | {v['added']} | {v['deleted']} | {v['added'] + v['deleted']} |")
-    L += ["", f"Reviewable (source, test, config, docs): **{r['reviewable']}** lines. "
+    L += ["", f"Reviewable (source, test, config, docs): **{r['reviewable']}** non-blank lines, whitespace changes "
+              f"not counted: the figure the builder's size gate measures. "
              f"Noise (generated, notebook, data, binary): **{r['noise']}** lines.", ""]
     if r["churn"]:
         L += ["## Whitespace-only churn", ""]

@@ -6,6 +6,7 @@ proves nothing. Run directly, or as `build_series.py --self-test`.
 """
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -486,6 +487,12 @@ def deleting_blank_lines_does_not_pass_the_gate(tmp):
     json.dump(p, open(path, "w"))
     rc, out = build(r)                                   # 122 lines against 360, and every statement is still there
     assert rc != 0 and "SIZE GATE FAILED" in out and "| `parse.py` | 122 | 122 | OVER" in out, out
+    # The audit's baseline is the same count: one figure for "how big is this branch".
+    md = os.path.join(tmp, "audit.md")
+    subprocess.run([sys.executable, os.path.join(HERE, "audit_diff.py"), "--repo", r, "--base", "main", "--head", "feature",
+                    "--md", md], capture_output=True, text=True, env=ENV)
+    gate = re.search(r"Total outside `size_ok`: (\d+) ->", open(os.path.join(k, "size.md")).read()).group(1)
+    assert f"**{gate}** non-blank lines" in open(md).read(), (gate, open(md).read()[:1500])
 
 
 @case

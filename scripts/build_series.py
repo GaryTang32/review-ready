@@ -131,13 +131,12 @@ import tempfile
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from audit_diff import classify  # noqa: E402  one definition of "reviewable" for the audit and the gate
+from audit_diff import reviewable_lines  # noqa: E402  one count of "reviewable" for the audit and the gate
 
 SHRINK = 0.5          # the series keeps at most this share of the branch's reviewable lines
 SHRINK_FLOOR = 100    # a branch with fewer reviewable lines is not gated: a 30-line fix is not halved
 FILE_FLOOR = 20       # nor is one file the branch changed by fewer lines
 LONG_LINE = 120       # a line past this that the branch did not have was run together to save lines
-REVIEWED = ("source", "test", "config", "docs", "other")
 
 TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$")
 # Files an owner expects to find in their working directory even when the series
@@ -281,23 +280,6 @@ def check_message(path, idx, sign_off):
     return subject
 
 
-def reviewable_lines(top, a, b):
-    """{path: non-blank lines changed} for the files a reader reviews by eye.
-
-    Whitespace changes and blank lines are not counted on either side, so neither dropping
-    churn nor deleting the blank lines between functions passes the size gate; only less code does.
-    """
-    out = {}
-    for line in git(top, "diff", "--numstat", "--no-renames", "-w", a, b, "--").splitlines():
-        add, _, path = line.split("\t", 2)
-        if add == "-" or classify(path) not in REVIEWED:
-            continue
-        diff = git(top, "diff", "-U0", "--no-renames", "-w", a, b, "--", path).splitlines()
-        first = next((i for i, text in enumerate(diff) if text.startswith("@@")), len(diff))
-        out[path] = sum(1 for text in diff[first:] if text[:1] in ("+", "-") and text[1:].strip())
-    return out
-
-
 def cramming(top, ref, path):
     """(statements that share a line with another, lines past LONG_LINE) in a Python file at `ref`.
 
@@ -322,7 +304,8 @@ def cramming(top, ref, path):
 def size_gate(top, base, original, series, plan):
     """The series against the branch, file by file and in total. Returns (passed, markdown)."""
     shrink, size_ok, scope_ok = plan.get("shrink", SHRINK), plan.get("size_ok") or {}, plan.get("scope_ok") or {}
-    before, after = reviewable_lines(top, base, original), reviewable_lines(top, base, series)
+    before = reviewable_lines(top, base, original, renames=False)
+    after = reviewable_lines(top, base, series, renames=False)
     total_b = sum(n for p, n in before.items() if p not in size_ok)
     total_a = sum(n for p, n in after.items() if p not in size_ok)
     gated = total_b >= SHRINK_FLOOR

@@ -53,8 +53,10 @@ Its **Ground** section decides whether the pass can start:
 - **more than one author**, or a branch already **published**: both change
   what landing means (section 7).
 
-Everything else it reports is listed at the top of the script, and every
-finding names the reference that says what to do about it. `--check-tip`
+Its **reviewable lines** are the size gate's count: non-blank lines changed in
+source, tests, config and docs, whitespace changes left out. Everything else
+it reports is listed at the top of the script, and every finding names the
+reference that says what to do about it. `--check-tip`
 runs the tests once, at the head, as the baseline. `--check` replays them at
 every commit, which is review mode's question, not this one's.
 
@@ -77,9 +79,11 @@ references it, only dead code calls it, or another file imports it, in which
 case the import goes too, or, under a try/except, removing it changes which
 branch runs. "The tree already has it" compares with definitions that existed
 before the branch and still exist at its head, so a function the branch moved
-is not listed as a copy of its old self. Run it again at the series head after the rewrite, if you
-want to see what the series still adds and whether anything single-use
-remains.
+is not listed as a copy of its old self. When the target has moved since the
+fork it also compares with the functions the target gained in between, which
+the branch has never seen, and says so on the row. Run it again at the series
+head after the rewrite, if you want to see what the series still adds and
+whether anything single-use remains.
 
 ## 2. Where the tests run
 
