@@ -124,13 +124,6 @@ def signature(fn):
     return params, sorted(local - set(params))
 
 
-def signature_text(fn):
-    try:
-        return f"{fn.name}({ast.unparse(fn.args)})"
-    except Exception:
-        return fn.name + "(...)"
-
-
 def _kind(value):
     if value is None or (isinstance(value, ast.Constant) and value.value is None):
         return "None"

@@ -396,23 +396,6 @@ def check_commits(repo, base, head, cmd, tip_only=False, timeout=900, import_che
     return results
 
 
-NEST = (ast.If, ast.For, ast.While, ast.Try, ast.AsyncFor)
-
-
-def max_depth(node, d=0):
-    best = d
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        nd = d
-        if isinstance(child, NEST):
-            elif_chain = (isinstance(node, ast.If) and isinstance(child, ast.If)
-                          and len(node.orelse) == 1 and node.orelse[0] is child)
-            nd = d if elif_chain else d + 1
-        best = max(best, max_depth(child, nd))
-    return best
-
-
 def py_symbols(src):
     try:
         tree = ast.parse(src)
@@ -421,7 +404,7 @@ def py_symbols(src):
     funcs, classes = [], []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            funcs.append((node.name, node.lineno, node.end_lineno, max_depth(node)))
+            funcs.append((node.name, node.lineno, node.end_lineno, cm.max_depth(node) if cm else 0))
         elif isinstance(node, ast.ClassDef):
             methods = [n.name for n in node.body
                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("__")]

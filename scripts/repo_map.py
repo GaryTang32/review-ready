@@ -86,7 +86,6 @@ SWITCH_HINT = re.compile(
     r"\bos\.environ\b|\bgetenv\(|\bload_dotenv\(|argparse|click\.|typer\.|"
     r"\b(config|settings|cfg|CONFIG|SETTINGS)\b|tomllib|tomli|yaml\.|json\.load\(|"
     r"datetime\.(now|utcnow|today)|date\.today|time\.time|random\.|np\.random\.")
-NEST = (ast.If, ast.For, ast.While, ast.Try, ast.AsyncFor)  # `with` is not a decision
 FUNC = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
@@ -95,20 +94,6 @@ def is_test(rel):
     base = os.path.basename(rel)
     return bool(re.search(r"(^|/)(tests?|__tests__)/", rel) or base == "conftest.py"
                 or re.search(r"(^|_)(self)?tests?(_|\.py$)", base))
-
-
-def max_depth(node, d=0):
-    best = d
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, FUNC + (ast.ClassDef,)):
-            continue
-        nd = d
-        if isinstance(child, NEST):
-            chain = (isinstance(node, ast.If) and isinstance(child, ast.If)
-                     and len(node.orelse) == 1 and node.orelse[0] is child)
-            nd = d if chain else d + 1
-        best = max(best, max_depth(child, nd))
-    return best
 
 
 def module_name(rel):
@@ -191,7 +176,7 @@ def analyse(m):
                     name=node.name, qual=qual, cls=cls, line=node.lineno,
                     end=node.end_lineno or node.lineno,
                     length=(node.end_lineno or node.lineno) - node.lineno + 1,
-                    depth=max_depth(node),
+                    depth=cm.max_depth(node) if cm else 0,   # one definition, in code_metrics
                     params=len(node.args.args) + len(node.args.kwonlyargs),
                     private=node.name.startswith("_"),
                     decorators=[ast.unparse(d) for d in node.decorator_list],
