@@ -38,7 +38,10 @@ code.
    runs the latter for you).
 5. **Measure** against the branch. The target is half or less, per file and
    in total. Still over: go through section 2 again, one move at a time.
-   Still over after that: section 5.
+   Still over after that: section 5. Stop there as soon as the only moves
+   left are chaining another call onto a line, joining two assertions, or
+   cutting a comment that says why: the file is then as short as it reads
+   well, and the last few lines are a `size_ok` reason, not a rewrite.
 
 "Shorter" means fewer concepts for the reader, not fewer characters. Joining
 lines, one-letter names, nested comprehensions three deep and walrus chains

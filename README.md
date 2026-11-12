@@ -155,7 +155,11 @@ Graded 21/21 and 26/26 on two fixtures with planted defects, and run against a
   reached its count by joining statements onto one line or running lines
   past 120 characters, but dense, clever code of normal shape still passes.
   The maintainer pass is what NAKs that ("clever"), and `size_ok` exists for
-  files that truly cannot shrink.
+  files that truly cannot shrink. This is not hypothetical: on the first
+  real agent-written branch the pass was run on, the first rewrite reached
+  half per file by chaining calls, the maintainer pass rejected it as
+  packed, and the reviewed series kept 37% of the branch overall with both
+  code files above half, each for a stated reason.
 - **Call resolution is a heuristic**, so every dead-code claim is conservative
   and the count of unresolved calls is printed beside it.
 - **It cannot judge whether your problem statement is right.** If the spec is
