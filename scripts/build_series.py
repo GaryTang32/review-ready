@@ -101,8 +101,11 @@ point in source, tests, config and docs, ignoring whitespace and blank lines,
 are compared file by file with the user's branch: the series may keep at most
 `shrink` of them in total and in every file the branch changed by 20 lines or
 more, unless the file is in `size_ok`. A branch under 100 such lines is not
-gated. The table goes to size.md; a failed gate fails the build and --land
-refuses the series. Stacking does not help: the gate measures the whole series.
+gated. A Python file also fails, as CRAMMED, when the series has more lines
+holding two statements, or more lines past 120 characters, than the branch
+had: that halves the line count and nothing else. The table goes to size.md; a
+failed gate fails the build and --land refuses the series. Stacking does not
+help: the gate measures the whole series.
 
 The residual is written next to the plan as residual.patch, as
 `git diff <original> <series>`: a `-` line is something the user's branch had
@@ -112,6 +115,7 @@ equal deferred.md plus the refactors, line for line.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -120,6 +124,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from audit_diff import classify  # noqa: E402  one definition of "reviewable" for the audit and the gate
@@ -127,6 +132,7 @@ from audit_diff import classify  # noqa: E402  one definition of "reviewable" fo
 SHRINK = 0.5          # the series keeps at most this share of the branch's reviewable lines
 SHRINK_FLOOR = 100    # a branch with fewer reviewable lines is not gated: a 30-line fix is not halved
 FILE_FLOOR = 20       # nor is one file the branch changed by fewer lines
+LONG_LINE = 120       # a line past this that the branch did not have was run together to save lines
 REVIEWED = ("source", "test", "config", "docs", "other")
 
 TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$")
@@ -285,6 +291,27 @@ def reviewable_lines(top, a, b):
     return out
 
 
+def cramming(top, ref, path):
+    """(statements that share a line with another, lines past LONG_LINE) in a Python file at `ref`.
+
+    The size gate counts lines. Joining statements with `;`, putting a body on its `if` line, or
+    running several lines into one long one halves the count and saves the reader nothing, so the
+    gate compares these two numbers with the branch's and fails a file that gained either.
+    """
+    if not path.endswith(".py"):
+        return 0, 0
+    shown = run(["git", "-C", top, "show", f"{ref}:{path}"], ok=True)
+    try:
+        tree = ast.parse(shown.stdout) if shown.returncode == 0 else None
+    except SyntaxError:
+        tree = None
+    if tree is None:
+        return 0, 0
+    starts = Counter(n.lineno for n in ast.walk(tree) if isinstance(n, ast.stmt))
+    return (sum(c - 1 for c in starts.values() if c > 1),
+            sum(1 for line in shown.stdout.splitlines() if len(line) > LONG_LINE))
+
+
 def size_gate(top, base, original, series, plan):
     """The series against the branch, file by file and in total. Returns (passed, markdown)."""
     shrink, size_ok, scope_ok = plan.get("shrink", SHRINK), plan.get("size_ok") or {}, plan.get("scope_ok") or {}
@@ -303,7 +330,12 @@ def size_gate(top, base, original, series, plan):
             verdict = f"OVER: at most {int(shrink * b)}"
             over.append(path)
         else:
-            verdict = "ok"
+            (joined_b, long_b), (joined_a, long_a) = cramming(top, original, path), cramming(top, series, path)
+            crammed = [f"{joined_a - joined_b} more statement(s) share a line than on the branch"] * (joined_a > joined_b) \
+                + [f"{long_a - long_b} more line(s) run past {LONG_LINE} characters"] * (long_a > long_b)
+            verdict = "CRAMMED: " + ", ".join(crammed) if gated and crammed else "ok"
+            if verdict != "ok":
+                over.append(path)
         rows.append(f"| `{path}` | {b} | {a} | {verdict} |")
     pct = f"{100 * total_a // total_b}%" if total_b else "-"
     if not gated:
@@ -315,10 +347,15 @@ def size_gate(top, base, original, series, plan):
     md = ["# Size: the series against the branch", "",
           f"Lines changed against the fork point, ignoring whitespace and blank lines, in source, tests, config "
           f"and docs. The series keeps at most {shrink:.0%} (`shrink`) of the branch: in total, and in every file "
-          f"the branch changed by {FILE_FLOOR} lines or more. A file listed in `size_ok` is exempt, with its reason.",
+          f"the branch changed by {FILE_FLOOR} lines or more. A Python file is CRAMMED when the series has more "
+          f"statements sharing a line, or more lines past {LONG_LINE} characters, than the branch had. A file "
+          f"listed in `size_ok` is exempt, with its reason.",
           "", "| file | branch | series | verdict |", "|---|---:|---:|---|", *rows, "",
           f"Total outside `size_ok`: {total_b} -> {total_a} ({pct}). Gate: **{result}**."]
     if result == "FAILED":
+        if any("| CRAMMED" in row for row in rows):
+            md += ["", "A CRAMMED file reached its line count by joining statements or lines: fewer lines, the "
+                   "same amount to read. Write it out one statement to a line and shrink it for real."]
         md += ["", "Rewrite each OVER file smaller (SKILL.md step 3, references/minimal-code.md). A file that "
                "truly cannot shrink goes in the plan's `size_ok` with the reason a reviewer would accept, and the "
                "reason goes in the PR description. Splitting into a stack does not change the total."]
@@ -731,7 +768,7 @@ def build(args, plan, plan_dir, resolve):
             print("\nresidual: none (the series reproduces the branch exactly)")
         with open(os.path.join(plan_dir, "size-gate.json"), "w") as fh:
             json.dump({"series": series_tip, "passed": size_passed}, fh)
-        print("\n" + "\n".join(l for l in size_md.splitlines() if "| OVER" in l or l.startswith("Total outside")))
+        print("\n" + "\n".join(l for l in size_md.splitlines() if "| OVER" in l or "| CRAMMED" in l or l.startswith("Total outside")))
         print(f"\n{source} has NOT moved. The series is at refs/review-ready/series/{source}: review it there "
               f"(git log {landed_on}..refs/review-ready/series/{source})" + (
                   f", and when the verdict is ACK:\n  python3 {os.path.abspath(__file__)} {os.path.abspath(args.plan)} "

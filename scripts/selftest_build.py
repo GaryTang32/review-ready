@@ -410,6 +410,35 @@ def keeping_more_than_half_needs_a_stated_reason(tmp):
 
 
 @case
+def joining_statements_to_halve_the_line_count_does_not_pass_the_gate(tmp):
+    r, path = verbose_branch(tmp, "c1"); k = os.path.join(r, ".review-ready")
+    steps = [f"step_{i} = text" for i in range(118)]
+    write(k, "overlays/02/parse.py", "def parse(text):\n" + "".join(
+        "    " + "; ".join(steps[i:i + 4]) + "\n" for i in range(0, 118, 4)) + "    return text.split(',')\n")
+    p = json.load(open(path)); p["patches"][1] = {"name": "parse", "message": "msgs/02.txt",
+                                                   "overlay": {"parse.py": "overlays/02/parse.py"}}
+    json.dump(p, open(path, "w"))
+    rc, out = build(r)                                   # 31 lines against the branch's 120: under half, and crammed
+    assert rc != 0 and "SIZE GATE FAILED" in out and "CRAMMED" in out and "share a line" in out, out
+    assert build(r, "--land")[0] != 0
+    p["size_ok"] = {"parse.py": "the owner wants these on one line each"}; json.dump(p, open(path, "w"))
+    assert build(r)[0] == 0
+
+
+@case
+def running_lines_together_does_not_pass_the_gate_either(tmp):
+    r, path = verbose_branch(tmp, "c2"); k = os.path.join(r, ".review-ready")
+    names = [f"step_{i}" for i in range(118)]
+    write(k, "overlays/02/parse.py", "def parse(text):\n" + "".join(
+        "    " + " = ".join(names[i:i + 20]) + " = text\n" for i in range(0, 118, 20)) + "    return text.split(',')\n")
+    p = json.load(open(path)); p["patches"][1] = {"name": "parse", "message": "msgs/02.txt",
+                                                   "overlay": {"parse.py": "overlays/02/parse.py"}}
+    json.dump(p, open(path, "w"))
+    rc, out = build(r)                                   # 7 lines, each one statement, each far past 120 characters
+    assert rc != 0 and "CRAMMED" in out and "characters" in out, out
+
+
+@case
 def write_mode_makes_a_new_branch_and_lands_nothing(tmp):
     r = repo(tmp, "v")
     rc, out = build(r, source=None, branch="topic/new", onto=None, base="main", patch0={"paths": None, "expect_fail_before": None,
