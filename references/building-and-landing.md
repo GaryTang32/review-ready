@@ -279,6 +279,26 @@ In chat, a line per item and no prose around them:
   --force-with-lease` if the branch was published, which you never do for
   them.
 
+**The review page.** One command turns the work directory into a page the
+owner can read before signing:
+
+```bash
+python3 $S/review_site.py $W --out $W/review.html      # several $W make one page with a tab each
+```
+
+It reads the branch as the owner left it and the series from git, never the
+checkout, and draws both call graphs on one layout: every function and class
+in the files either side changes, the calls between them, the code elsewhere
+they call or are called by, and the code elsewhere on the same subject
+(`repo_index.py`). Each function carries its fate (kept, rewritten, dropped,
+added by the series), its lines on both sides, the patch that changes it, and
+every sentence of `deferred.md`, the messages and `defence.md` that names it,
+so a function with no sentence is one the owner has to ask about. Below the
+graph: the calls that change, a table of every fate, the plan patch by patch
+(why, and how it was checked), the problem, the deferred list, the size table
+and the review rounds. `--fragment` leaves the document wrapper to a host
+that adds one. The page loads no script.
+
 Then the PR itself: the title, the body (`cover-letter.md`), and for a stack
 which branch is which and that only the first is opened. Once the PR merges,
 `$W` and `refs/review-ready/*/<branch>` can go. Do not paste patches into

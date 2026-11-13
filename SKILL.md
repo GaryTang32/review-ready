@@ -30,7 +30,8 @@ that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
 (`build_series.py --self-test`: thirty-one situations in scratch repos;
 `repo_map.py --self-test`: the focus map and the whole-tree map, 46 cases;
-`repo_index.py --self-test`: the stored graph and its retrieval, 14 cases).
+`repo_index.py --self-test`: the stored graph and its retrieval, 14 cases;
+`review_site.py --self-test`: the review page, 14 cases).
 
 ## References: read the one the moment calls for
 
@@ -386,7 +387,11 @@ Landing refuses a series that failed the size gate. **Ask before landing**
 when the audit showed more than one author or a published branch; otherwise
 the request to clean the branch is the authorisation. The hand-back leads
 with the before/after size and ends with the undo command copied from
-`UNDO.md`. Do not push or open the PR unless asked.
+`UNDO.md`. Give the owner the review page too: `python3 $S/review_site.py $W
+--out $W/review.html` draws the branch's call graph and the series' on one
+layout, with each function's fate, the sentence that justifies it, the plan
+and the evidence (building-and-landing.md section 8). Do not push or open
+the PR unless asked.
 
 ## Write mode
 
