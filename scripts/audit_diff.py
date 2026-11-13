@@ -202,8 +202,8 @@ def classify(path):
     if p.endswith(DOC_SUFFIX) or re.search(r"(^|/)docs?/", p):
         return "docs"
     if p.endswith(CONFIG_SUFFIX) or name in ("dockerfile", "makefile") or p.startswith(".github/") or name.startswith(".env"):
-        if p.endswith(".json") and re.search(r"(^|/)(data|fixtures)/", p):
-            return "data"
+        if p.endswith(".json") and re.search(r"(^|/)(data|fixtures|results|outputs?)/", p):
+            return "data"                   # written by code or kept as a fixture: nobody shrinks it by hand
         return "config"
     if p.endswith(CODE_SUFFIX):
         return "source"
