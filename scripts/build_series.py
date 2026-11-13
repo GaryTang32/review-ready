@@ -49,6 +49,9 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
               "src/acme/notes.py": "comments only"},
                                        # a reason for a change no sentence of deferred.md or a message names
                                        # (see "The reason gate"); keyed path:qual, path:<module>, or a path
+  "must_pass": ["tests/test_loader.py::test_nan_is_null", "test_rejects_empty_file"],
+                                       # tests that may not fail on the series, run as the user's branch has
+                                       # them (pytest ids, or a test's name); one that fails stops the build
   "allow_vacuous_check": "<reason>",   # accept a check that ran zero tests, or skipped them all
   "no_check_reason": "<reason>",       # a plan with no `check`: say why, or the build refuses
   "patches": [
@@ -722,6 +725,7 @@ def build(args, plan, plan_dir, resolve):
     blocking = [r for r in reasons_md.splitlines() if r.startswith(("- MISSING", "- REJECTED"))]
 
     residual, size_passed, size_md = "", True, ""
+    test_rows, test_problems = [], []
     if files_from:
         # Scope: a pre-PR pass cleans what the branch wrote. A file the branch never
         # touched is someone else's code, and the owner will be asked to defend it.
@@ -759,9 +763,28 @@ def build(args, plan, plan_dir, resolve):
             if state == "ok":
                 print(f"  the branch's original tests pass against the rebuilt code {test_counts(out) or ''}")
             else:
+                # Every one of the branch's tests that fails is a change like any other: it needs its
+                # reason, and one the plan lists in must_pass may not fail at all.
+                failing = rs.failing_tests(out, lambda path: git(top, "show", f"{files_from}:{path}", ok=True))
+                test_rows = rs.account_tests(failing, plan, rs.sources(plan, plan_dir))
+                test_problems += [problem for _id, _reason, problem in test_rows if problem]
+                if not failing:
+                    test_problems.append(f"UNREAD   the branch's tests {state} against the series, and no failing test "
+                                         f"could be read from the output: see {report}")
                 print(f"  the branch's ORIGINAL tests against the rebuilt code: {state}: {last_line(out)}\n"
-                      f"  Each failure is a deferred feature's test, or a behaviour this series changed: say which, one "
-                      f"by one, in deferred.md and the hand-back. Full output: {report}")
+                      f"  {len(failing)} of them fail; each needs its reason (a sentence naming the test, or a plan "
+                      f"reasons entry), and none may be in must_pass. Full output: {report}")
+
+    must = plan.get("must_pass") or []
+    if must and not args.no_check:
+        test_problems += run_must_pass(must, top, wt, files_from, check, check_vars, python, timeout)
+    with open(os.path.join(plan_dir, "tests.md"), "w") as fh:
+        fh.write(tests_report(test_rows, test_problems, must))
+    if test_problems:
+        print("\ntests:")
+        for line in test_problems[:20]:
+            print(f"  {line}")
+    blocking += test_problems
 
     landed_on = base
     if onto and sha(top, onto) != sha(top, base):
@@ -819,7 +842,8 @@ def build(args, plan, plan_dir, resolve):
         with open(os.path.join(plan_dir, "size-gate.json"), "w") as fh:
             json.dump({"series": series_tip, "passed": size_passed}, fh)
         with open(os.path.join(plan_dir, "reasons.json"), "w") as fh:
-            json.dump({"series": series_tip, "from": compared_from, "compared": compared, "passed": not blocking}, fh)
+            json.dump({"series": series_tip, "from": compared_from, "compared": compared, "passed": not blocking,
+                       "tests_passed": not test_problems}, fh)
         print("\n" + "\n".join(l for l in size_md.splitlines() if "| OVER" in l or "| CRAMMED" in l or l.startswith("Total outside")))
         print_reasons(reason_rows, reasons_md, plan, plan_dir)
         print(f"\n{source} has NOT moved. The series is at refs/review-ready/series/{source}: review it there "
@@ -828,8 +852,8 @@ def build(args, plan, plan_dir, resolve):
                   "--land" if size_passed and not blocking else
                   f".\nSIZE GATE FAILED: the series keeps too much of the branch to land. Full table in "
                   f"{os.path.join(plan_dir, 'size.md')}" if not size_passed else
-                  f".\nREASON GATE FAILED: {len(blocking)} change(s) cannot land as they are. Full table in "
-                  f"{os.path.join(plan_dir, 'reasons.md')}"))
+                  f".\nREASON GATE FAILED: {len(blocking)} change(s) or test(s) cannot land as they are. Tables: "
+                  f"{os.path.join(plan_dir, 'reasons.md')}, {os.path.join(plan_dir, 'tests.md')}"))
         if not size_passed or blocking:
             sys.exit(1)
     else:
@@ -844,6 +868,78 @@ def build(args, plan, plan_dir, resolve):
         for s in stack:
             git(top, "update-ref", f"refs/heads/{s['branch']}", shas[s["through"] - 1])
         print(f"\nbranch {branch} holds the series (write mode: no residual, nothing to land)")
+
+
+def run_must_pass(must, top, wt, files_from, check, check_vars, python, timeout):
+    """Problems: each entry of the plan's must_pass that names no test, or whose test does not pass on the series.
+
+    The tests run as the owner's branch has them, against the series' code: the branch's version of
+    each file that holds one is put in the worktree for the run and taken out after it.
+    """
+    if not check:
+        return ["MUST-PASS the plan lists must_pass tests but has no check command to run them with"]
+    known = set()
+    for ref in filter(None, (files_from, "HEAD")):
+        tree_ = wt if ref == "HEAD" else top
+        for path in git(tree_, "ls-tree", "-r", "--name-only", ref).split("\n"):
+            if TEST_PATH.search(path) and path.endswith(".py"):
+                known |= set(rs.test_ids(path, git(tree_, "show", f"{ref}:{path}", ok=True) or ""))
+    problems, wanted = [], {}
+    for entry in must:
+        hits = sorted(i for i in known if rs.matches(i, entry))
+        if not hits:
+            problems.append(f"MUST-PASS {entry}: names no test on the branch or the series")
+        wanted.update({h: entry for h in hits})
+    if not wanted:
+        return problems
+    files = sorted({i.split("::")[0] for i in wanted})
+    theirs = [f for f in files if files_from and git(top, "cat-file", "-e", f"{files_from}:{f}", ok=True) is not None]
+    if theirs:
+        git(wt, "checkout", files_from, "--", *theirs)
+    env = "".join(f"{k}={shlex.quote(v)} " for k, v in (check_vars or {}).items())
+    has_pytest = shell(f"{env}{shlex.quote(python)} -c 'import pytest'", wt, timeout, None)[0] == "ok"
+    if has_pytest:
+        state, out = shell(f"{env}{shlex.quote(python)} -m pytest -q -p no:cacheprovider -rA "
+                           + " ".join(shlex.quote(i) for i in sorted(wanted)), wt, timeout, None)
+        passed = {re.sub(r"\[.*\]$", "", p) for p in re.findall(r"^PASSED (\S+)", out, re.M)}
+    else:
+        # No pytest in this interpreter, and the skill installs nothing: unittest runs a test
+        # method by its dotted name, module.Class.method. A plain function needs pytest.
+        dotted = {i: i.split("::")[0][:-3].replace("/", ".") + "." + ".".join(i.split("::")[1:]) for i in wanted if i.count("::") == 2}
+        problems += [f"MUST-PASS {i}: a test function outside a class runs only under pytest, which this interpreter "
+                     "does not have" for i in wanted if i not in dotted]
+        state, out = shell(f"{env}{shlex.quote(python)} -m unittest -v " + " ".join(shlex.quote(d) for d in dotted.values()),
+                           wt, timeout, None) if dotted else ("ok", "")
+        ok = {f"{where}" if where.endswith("." + name) else f"{where}.{name}"
+              for name, where in re.findall(r"^(\w+) \(([\w.]+)\)[^\n]*\.\.\. ok$", out, re.M)}
+        passed = {i for i, d in dotted.items() if d in ok}
+    git(wt, "reset", "-q", "--hard", "HEAD")
+    git(wt, "clean", "-xdfq", ok=True)
+    if state in ("did not run", "timed out"):
+        return problems + [f"MUST-PASS the must-pass tests {state}: {last_line(out)}"]
+    for ident in sorted(wanted):
+        if ident not in passed and not any(p.startswith(f"MUST-PASS {ident}:") for p in problems):
+            problems.append(f"MUST-PASS {ident}: the owner marked it as a test that must pass, and it does not pass "
+                            "on the series")
+    print(f"  must-pass tests: {sum(1 for i in wanted if i in passed)} of {len(wanted)} pass on the series, "
+          "run as the branch has them")
+    return problems
+
+
+def tests_report(rows, problems, must):
+    lines = ["# Tests: the branch's own tests against the series, and the tests that must pass", "",
+             "Each of the branch's tests that fails against the series needs its reason. A test in the plan's "
+             "`must_pass` may not fail at all.", ""]
+    if must:
+        lines += ["Must pass: " + ", ".join(f"`{m}`" for m in must), ""]
+    if rows:
+        lines += ["| test | reason | source |", "|---|---|---|"]
+        lines += [f"| `{ident}` | {(r['text'] if r else '**MISSING**').replace('|', '/')[:300]} | {r['source'] if r else ''} |"
+                  for ident, r, _p in rows]
+    else:
+        lines.append("None of the branch's tests fails against the series.")
+    lines += ["", "Gate: **passed**." if not problems else f"Gate: **FAILED**, {len(problems)} problem(s):"]
+    return "\n".join(lines + [f"- {p}" for p in problems]) + "\n"
 
 
 def print_reasons(rows, md, plan, plan_dir):
@@ -894,6 +990,9 @@ def land(args, plan, plan_dir, resolve):
         recorded = {}
     if recorded.get("series") != new_tip or not ref_exists(top, f"refs/review-ready/compared/{source}"):
         sys.exit("no reason-gate record for this series (reasons.json is missing or from another build): rebuild")
+    if recorded.get("tests_passed") is False:
+        sys.exit(f"a must-pass test fails, or one of the branch's tests fails with no reason: see "
+                 f"{os.path.join(plan_dir, 'tests.md')}; fix it and rebuild")
     ok, _rows, md = rs.gate(top, recorded["from"], sha(top, f"refs/review-ready/compared/{source}"), plan, plan_dir)
     with open(os.path.join(plan_dir, "reasons.md"), "w") as fh:
         fh.write(md)

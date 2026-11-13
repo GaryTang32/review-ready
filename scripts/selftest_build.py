@@ -532,6 +532,31 @@ def an_interactive_run_lands_only_what_the_owner_adopted(tmp):
 
 
 @case
+def a_test_the_owner_marked_must_pass_cannot_be_reasoned_away(tmp):
+    # The series keeps the old func1 (no generators) and its own test file without test_gen: the
+    # check passes, so only the run of the branch's own tests shows that test_gen is lost.
+    r = repo(tmp, "mp"); k = os.path.join(r, ".review-ready")
+    write(k, "overlays/01/f.py", BASE_F.replace("return len(rows)", "return len(rows)  # sized input only"))
+    write(k, "overlays/01/tests/test_f.py", BASE_T)
+    over = {"overlay": {"f.py": "overlays/01/f.py", "tests/test_f.py": "overlays/01/tests/test_f.py"},
+            "paths": None, "expect_fail_before": None}
+    rc, out = build(r, patch0=over, reasons={"f.py:func1": "back to the base version", "tests/test_f.py": "the base tests"})
+    assert rc != 0 and "MISSING  tests.test_f.T.test_gen" in out, "a lost test of the branch went unnoticed:\n" + out
+    write(k, "deferred.md", "# Deferred\n\n- `junk()`: a debug print.\n- `test_gen`: generators are deferred to their own PR.\n")
+    rc, out = build(r, patch0=over, reasons={"f.py:func1": "back to the base version", "tests/test_f.py": "the base tests"})
+    assert rc == 0, "a lost test with its reason should build:\n" + out
+    rc, out = build(r, patch0=over, must_pass=["test_gen"],
+                    reasons={"f.py:func1": "back to the base version", "tests/test_f.py": "the base tests"})
+    assert rc != 0 and "MUST-PASS" in out and "test_gen" in out, "a must-pass test was reasoned away:\n" + out
+    assert "MUST-PASS" in open(os.path.join(k, "tests.md")).read()
+    write(k, "overlays/01/f.py", CLEAN_F)                          # the real series keeps generators: it passes
+    rc, out = build(r, must_pass=["test_gen"])
+    assert rc == 0 and "must-pass tests: 1 of 1 pass" in out, out
+    rc, out = build(r, must_pass=["test_nothing_like_this"])
+    assert rc != 0 and "names no test" in out, out
+
+
+@case
 def write_mode_holds_each_patch_to_its_budget(tmp):
     r = repo(tmp, "wb")
     over = {"paths": None, "expect_fail_before": None, "overlay": {"f.py": "overlays/01/f.py"}}
