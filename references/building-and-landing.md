@@ -154,8 +154,11 @@ Per patch:
 
 Per plan:
 - `run`: `"interactive"` or `"auto"` (SKILL.md, "Two ways to run");
-- `reasons`: a reason for a change no sentence names, keyed `path:qual`,
-  `path:<module>` for a module's own code, or a path for a whole file;
+- `reasons`: a reason for a change no sentence names, or one whose matching
+  sentence does not explain it (a plan entry wins over a sentence), keyed
+  `path:qual`, `path:<module>` for a module's own code, or a path for a whole
+  file. Read the reason table row by row: a sentence matches by naming the
+  change, which is not the same as explaining it;
 - `base`, `onto`, `source`, `check`, `import_check`, `stack`;
 - `scope_ok`, the reason for each file the branch never touched;
 - `size_ok`, the reason for each file exempt from the size gate;
@@ -315,7 +318,7 @@ Reject buttons, and "Copy decisions" gives the text for `decisions.json`. Below 
 graph: the calls that change, a table of every fate, the plan patch by patch
 (why, and how it was checked), the problem, the deferred list, the size table
 and the review rounds. `--fragment` leaves the document wrapper to a host
-that adds one. The page loads no script.
+that adds one. The page's script is inline: it loads nothing from anywhere.
 
 Then the PR itself: the title, the body (`cover-letter.md`), and for a stack
 which branch is which and that only the first is opened. Once the PR merges,

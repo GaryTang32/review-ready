@@ -134,7 +134,7 @@ absent and reports green.
 | Suite | Cases |
 |---|---|
 | `build_series.py --self-test` | 33 whole situations in scratch repositories |
-| `reasons.py --self-test` | 18: what counts as a change, what counts as its reason, and an owner's adopt, reject and edit |
+| `reasons.py --self-test` | 19: what counts as a change, what counts as its reason, and an owner's adopt, reject and edit |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |

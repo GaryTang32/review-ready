@@ -74,11 +74,22 @@ def bound(statements):
 
 
 def module_names(old, new):
-    """The top-level names whose binding statement one side has and the other does not."""
-    def body(src):
-        return {ast.dump(n): n for n in ast.parse(src).body if not isinstance(n, DEFS)}
-    a, b = body(old), body(new)
-    return sorted(bound([a[k] for k in a.keys() - b.keys()] + [b[k] for k in b.keys() - a.keys()]))
+    """The top-level names whose binding changed: imported on one side only, or assigned differently.
+
+    `from .ledger import Ledger` becoming `from .ledger import Ledger, export` changes `export`
+    only, so a sentence about `Ledger` does not explain it.
+    """
+    def split(src):
+        imports, others = set(), {}
+        for n in ast.parse(src).body:
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                imports |= {(getattr(n, "module", None) or "", a.name, (a.asname or a.name).split(".")[0]) for a in n.names}
+            elif not isinstance(n, DEFS):
+                others[ast.dump(n)] = n
+        return imports, others
+    (ia, oa), (ib, ob) = split(old), split(new)
+    changed = [oa[k] for k in oa.keys() - ob.keys()] + [ob[k] for k in ob.keys() - oa.keys()]
+    return sorted({bound_name for _m, _n, bound_name in ia ^ ib} | bound(changed))
 
 
 def definitions(src):
@@ -311,6 +322,7 @@ def self_test():
                  ("message 1", "core: count the rows of a file\n\ncount() returns how many rows a file has.\n")]
         _, problems = account([dict(r) for r in rows], plan, texts)
         missing = sorted(p.split()[1] for p in problems if p.startswith("MISSING"))
+        widened = module_names("from .a import Ledger\n", "from .a import Ledger, export\n")
         with_reasons = dict(plan, reasons={"pkg/core.py:load": "strips the text itself, now that _strip is gone",
                                            "pkg/core.py:<module>": "the os import had no user", "pkg/notes.py": "a comment"})
         _, none_left = account([dict(r) for r in rows], with_reasons, texts)
@@ -328,6 +340,7 @@ def self_test():
             ("a class dropped whole is one change with its methods",
              "pkg/core.py:Cache" in found and not any(k.startswith("pkg/core.py:Cache.") for k in found)),
             ("a changed import is the module's own code", found.get("pkg/core.py:<module>", {}).get("kind") == "module code"),
+            ("a widened import changes only the name it adds", widened == ["export"]),
             ("a comment-only edit is a change to the file", found.get("pkg/notes.py", {}).get("kind") == "comments and layout"),
             ("a dropped file is one change", found.get("requirements.txt", {}).get("fate") == "dropped"),
             ("an unchanged file is not a change", "README.md" not in found),

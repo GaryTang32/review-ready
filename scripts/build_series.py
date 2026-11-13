@@ -146,7 +146,7 @@ import tempfile
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from audit_diff import reviewable_lines  # noqa: E402  one count of "reviewable" for the audit and the gate
+from audit_diff import reviewable_lines, test_counts  # noqa: E402  one count of "reviewable" and of tests run
 import reasons as rs  # noqa: E402  the reason gate: every change the series makes needs its reason
 
 SHRINK = 0.5          # the series keeps at most this share of the branch's reviewable lines
@@ -222,19 +222,6 @@ def last_line(out):
     return lines[-1][:110] if lines else "no output"
 
 
-def test_counts(out):
-    """(tests run, skipped) read from a unittest or pytest summary; None when neither is recognised."""
-    m = re.search(r"^Ran (\d+) tests?", out, re.M)
-    if m:
-        sk = re.search(r"skipped=(\d+)", out)
-        return int(m.group(1)), int(sk.group(1)) if sk else 0
-    if re.search(r"\b\d+ (passed|failed|skipped|errors?|deselected)\b", out) or "no tests ran" in out:
-        n = lambda word: sum(int(x) for x in re.findall(rf"\b(\d+) {word}\b", out.strip().splitlines()[-1]))
-        skipped = n("skipped")
-        return n("passed") + n("failed") + n("errors?") + skipped, skipped
-    return None
-
-
 def errored_not_asserted(out):
     """True when a test run failed by error (import, name, missing runner), not by assertion."""
     if re.search(r"No module named|ModuleNotFoundError|ImportError|AttributeError: .*has no attribute|not found", out):
@@ -255,7 +242,16 @@ def split_env(check):
     return env, (tokens[0] if tokens else None)
 
 
-def check_message(path, idx, sign_off):
+AREA = re.compile(r"^[\w./-]+: ")
+
+
+def uses_areas(top):
+    """True when most of the repo's recent subjects start with `area: `; otherwise its convention has none."""
+    subjects = git(top, "log", "-50", "--no-merges", "--format=%s", ok=True).splitlines()
+    return not subjects or sum(bool(AREA.match(s)) for s in subjects) * 2 >= len(subjects)
+
+
+def check_message(path, idx, sign_off, areas=True):
     with open(path) as fh:
         lines = fh.read().rstrip("\n").split("\n")
     subject = lines[0] if lines else ""
@@ -273,8 +269,8 @@ def check_message(path, idx, sign_off):
         warn.append(f"subject is {len(subject)} chars; keep it near 60")
     if subject.rstrip().endswith("."):
         warn.append("subject ends with a period")
-    if ":" not in subject:
-        warn.append("subject has no 'area:' prefix")
+    if areas and ":" not in subject:
+        warn.append("subject has no 'area:' prefix, and most of this repo's subjects have one")
     if len(lines) > 1 and lines[1].strip():
         warn.append("no blank line after the subject")
     if not [l for l in lines[2:] if l.strip()]:
@@ -493,7 +489,7 @@ def build(args, plan, plan_dir, resolve):
         print(f"would build from {base} in {top}" + (f", taking files from {source} as the user left it"
                                                      if source else f" onto new branch {branch} (write mode)"))
         for i, p in enumerate(patches, 1):
-            check_message(resolve(p["message"]), i, sign_off)
+            check_message(resolve(p["message"]), i, sign_off, uses_areas(top))
             print(f"  {i:02d} {p.get('name', '')}: paths={p.get('paths', [])} delete={p.get('delete', [])} "
                   f"overlay={list(p.get('overlay', {}))} patch={p.get('patch')}")
         return
@@ -560,6 +556,7 @@ def build(args, plan, plan_dir, resolve):
 
     ask_import()
 
+    areas = uses_areas(top)
     rows, added_by, last_overlay = [], {}, {}
     for i, p in enumerate(patches, 1):
         name = p.get("name", f"patch-{i:02d}")
@@ -634,7 +631,7 @@ def build(args, plan, plan_dir, resolve):
                    "otherwise; read it (testing.md section 3)" if errored_not_asserted(out) else "by assertion")
             print(f"  {i:02d}/{len(patches)}  fails on the parent, passes here; on the parent it failed {how}: "
                   f"{last_line(out)}")
-        subject = check_message(resolve(p["message"]), i, sign_off)
+        subject = check_message(resolve(p["message"]), i, sign_off, areas)
         cmd = ["commit", "-q", "-F", resolve(p["message"])]
         if sign_off:
             cmd.append("--signoff")

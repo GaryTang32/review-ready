@@ -371,6 +371,19 @@ def leading_env(cmd):
     return env, interp
 
 
+def test_counts(out):
+    """(tests run, skipped) read from a unittest or pytest summary; None when neither is recognised."""
+    m = re.search(r"^Ran (\d+) tests?", out, re.M)
+    if m:
+        sk = re.search(r"skipped=(\d+)", out)
+        return int(m.group(1)), int(sk.group(1)) if sk else 0
+    if re.search(r"\b\d+ (passed|failed|skipped|errors?|deselected)\b", out) or "no tests ran" in out:
+        n = lambda word: sum(int(x) for x in re.findall(rf"\b(\d+) {word}\b", out.strip().splitlines()[-1]))
+        skipped = n("skipped")
+        return n("passed") + n("failed") + n("errors?") + skipped, skipped
+    return None
+
+
 def check_commits(repo, base, head, cmd, tip_only=False, timeout=900, import_check=None):
     """Run cmd against a read-only export of every commit in base..head, or of the tip alone."""
     shas = git(repo, "log", "--reverse", "--format=%H", f"{base}..{head}").split()
@@ -411,11 +424,10 @@ def check_commits(repo, base, head, cmd, tip_only=False, timeout=900, import_che
             # fact about the command, and says nothing about the commit.
             state = "ok" if r.returncode == 0 else "did not run" if r.returncode in (126, 127) else "FAIL"
             out = r.stdout + r.stderr
-            ran = re.search(r"^Ran (\d+) tests?", out, re.M)
-            skipped = re.search(r"skipped=(\d+)", out)
-            if state == "ok" and ran and (ran.group(1) == "0" or (skipped and skipped.group(1) == ran.group(1))):
+            found = test_counts(out)              # unittest's "Ran N tests" or pytest's summary line
+            if state == "ok" and found and (found[0] == 0 or found[0] == found[1]):
                 state = "vacuous"           # green with nothing run certifies nothing
-            counts = f"{ran.group(1)} tests, {skipped.group(1) if skipped else 0} skipped" if ran else "test count not recognised"
+            counts = f"{found[0]} tests, {found[1]} skipped" if found else "test count not recognised"
             results[sha[:10]] = (state, out.strip().splitlines()[-6:] + [f"[{counts}]"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
