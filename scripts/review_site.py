@@ -444,7 +444,8 @@ def load_review(folder, taken):
         text = read(folder, os.path.basename(path))
         found = re.search(r"^#+\s*Verdict:\s*([A-Z]+)", text, re.M)
         verdicts.append(dict(name=os.path.basename(path), verdict=found.group(1) if found else "?",
-                             answered=bool(re.search(r"^#+\s*What round \d+ changed", text, re.M))))
+                             answered=bool(re.search(r"^#+\s*What round \d+ changed", text, re.M)),
+                             same=bool(re.search(r"Reviewer:\s*same context", text, re.I))))
     title = (read(folder, "cover-letter.md").splitlines() or [""])[0]
     title = re.sub(r"^\[PATCH[^\]]*\]\s*", "", title) or source
     return dict(
@@ -806,7 +807,8 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
       ? `<span class="chip bad">Size gate not met</span>` : "";
     const review = !last ? `<span class="chip plain">Not reviewed yet</span>`
       : `<span class="chip ${last.verdict === "ACK" ? "good" : "bad"}">Last review: ${esc(last.verdict)} (${R.verdicts.length} round${R.verdicts.length > 1 ? "s" : ""})</span>`
-        + (last.answered ? `<span class="chip wait">Changes since that review are not reviewed</span>` : "");
+        + (last.answered ? `<span class="chip wait">Changes since that review are not reviewed</span>` : "")
+        + (last && last.same ? `<span class="chip wait">Reviewed by the agent that wrote it: a second reader is owed</span>` : "");
     $("intro").innerHTML = `<p class="eyebrow">Pre-PR pass on <code>${esc(R.branch)}</code></p>
       <h1>${esc(R.title)}</h1>
       <div class="refs"><span>branch as written <code>${esc(R.sha.original.slice(0, 10))}</code></span>

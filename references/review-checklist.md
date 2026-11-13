@@ -10,7 +10,10 @@ ask for them: if a patch needs them to be understood, that is the finding. You
 write nothing in the repo; what you run, you run yourself and paste:
 `audit_diff.py --base <target> --head <series> --check "<test command>"` is
 how "passes at every patch" becomes something you saw rather than something
-you were told.
+you were told. When the suite is slow, the builder's own line per patch
+(`check=ok (N tests)`, run from a cleaned private worktree) counts as seen if
+you read it in the build's output yourself; run `--check` when anything in
+the series makes you doubt it.
 
 ## How to read
 

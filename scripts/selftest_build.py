@@ -557,6 +557,20 @@ def a_test_the_owner_marked_must_pass_cannot_be_reasoned_away(tmp):
 
 
 @case
+def a_rebuild_that_only_rewords_a_message_runs_no_tests(tmp):
+    r = repo(tmp, "ct"); k = os.path.join(r, ".review-ready")
+    rc, out = build(r)
+    assert rc == 0 and "check=ok (2 tests)" in out, out
+    write(k, "msgs/01.txt", MSG.replace("Materialise it first", "Turn it into a list first"))
+    rc, out = build(r)
+    assert rc == 0 and "this tree passed before" in out, out
+    write(k, "overlays/01/f.py", CLEAN_F.replace("len(list(rows))", "sum(1 for _ in rows)"))
+    rc, out = build(r)                                       # new code: checked again
+    assert rc == 0 and "check=ok (2 tests)" in out, out
+    assert build(r, "--restart")[1].count("this tree passed before") == 0
+
+
+@case
 def write_mode_holds_each_patch_to_its_budget(tmp):
     r = repo(tmp, "wb")
     over = {"paths": None, "expect_fail_before": None, "overlay": {"f.py": "overlays/01/f.py"}}

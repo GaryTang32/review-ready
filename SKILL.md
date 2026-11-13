@@ -28,7 +28,7 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: thirty-four situations in scratch repos;
+(`build_series.py --self-test`: thirty-five situations in scratch repos;
 `reasons.py --self-test`: what counts as a change and as its reason, 25 cases;
 `repo_map.py --self-test`: the focus map and the whole-tree map, 46 cases;
 `repo_index.py --self-test`: the stored graph and its retrieval, 14 cases;

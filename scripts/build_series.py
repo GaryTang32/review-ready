@@ -128,6 +128,10 @@ rejected in decisions.json that is still in the series. With "run": "interactive
 refuses while any change waits for the owner's decision; it re-reads decisions.json, so record
 the decisions and land without rebuilding. Write mode compares the base with the series.
 
+A tree that passed the check in an earlier build is not checked again: the builder keeps the
+ids of the trees that passed, with the command, in checked-trees.json, so a rebuild that only
+rewords messages or reorders nothing costs no test run. --restart forgets them.
+
 The residual is written next to the plan as residual.patch, as
 `git diff <original> <series>`: a `-` line is something the user's branch had
 and the series does not; a `+` line is something the series added. It must
@@ -561,6 +565,12 @@ def build(args, plan, plan_dir, resolve):
 
     areas = uses_areas(top)
     rows, added_by, last_overlay = [], {}, {}
+    # Trees that passed the check, by tree id: a tree is the code, whatever commit or message holds it.
+    passed_path = os.path.join(plan_dir, "checked-trees.json")
+    try:
+        passed_before = {} if args.restart else json.load(open(passed_path))
+    except (OSError, ValueError):
+        passed_before = {}
     for i, p in enumerate(patches, 1):
         name = p.get("name", f"patch-{i:02d}")
         for path in p.get("paths", []):
@@ -679,7 +689,12 @@ def build(args, plan, plan_dir, resolve):
                      "an unpinned rewrite.")
             print(f"  {i:02d}/{len(patches)}  test is load-bearing: it fails when {mu['file']} is broken")
         status = "skipped"
-        if check and p.get("check", True):
+        tree_id = git(wt, "rev-parse", "HEAD^{tree}").strip()
+        if check and p.get("check", True) and passed_before.get(tree_id) == check:
+            # The same tree, byte for byte, passed the same command in an earlier build: a rebuild
+            # that only rewords a message does not run the whole suite again.
+            status = "ok (this tree passed before)"
+        elif check and p.get("check", True):
             state, out = shell(check, wt, timeout, None)
             if state == "did not run":
                 stop(f"\ncheck did not run at patch {i}/{len(patches)} ({name}): {last_line(out)}\n{NOT_RUN_HELP}")
@@ -697,6 +712,9 @@ def build(args, plan, plan_dir, resolve):
                      + "\n".join(out.strip().splitlines()[-25:]))
             status = f"ok ({counts[0]} tests" + (f", {counts[1]} skipped)" if counts and counts[1] else ")") \
                 if counts else "ok (test count not recognised)"
+            passed_before[tree_id] = check
+            with open(passed_path, "w") as fh:
+                json.dump(passed_before, fh)
         rows.append((i, subject, files, add, dele, status))
         print(f"  {i:02d}/{len(patches)}  +{add:<5}-{dele:<5} {files:>2} file(s)  check={status:<14} {subject}")
         if p.get("budget") and add + dele > p["budget"]:
