@@ -25,7 +25,10 @@ Its reason is the first of:
 A change with none is MISSING.
 
 The builder runs this after every build (the reason gate): a change with no reason fails the
-build and --land refuses the series. With "run": "interactive" in the plan, every change also
+build and --land refuses the series. The same rule covers the branch's own tests: each one that
+fails against the series needs its reason (a sentence naming the test, or a plan "reasons"
+entry keyed by its id), and a test the plan lists in "must_pass" may not fail at all. A test
+file that does not load counts every test it defines. With "run": "interactive" in the plan, every change also
 needs the owner's decision in decisions.json, keyed the same way: "adopt", "reject", or any
 other text, which is a request to change it first. A change the owner rejected must not be in
 the series; a change they asked to edit waits until it is shown again and adopted.
@@ -264,6 +267,72 @@ def report(rows, problems, plan):
     return "\n".join(head + table + verdict) + "\n"
 
 
+# ---------------------------------------------------------------- tests that fail, and tests that must pass
+
+def test_ids(path, src):
+    """The tests a file defines, as pytest ids: path::test_x and path::Class::test_x."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    out = []
+    for node in tree.body:
+        if isinstance(node, FUNCS) and node.name.startswith("test"):
+            out.append(f"{path}::{node.name}")
+        elif isinstance(node, ast.ClassDef):
+            out += [f"{path}::{node.name}::{m.name}" for m in node.body if isinstance(m, FUNCS) and m.name.startswith("test")]
+    return out
+
+
+def failing_tests(out, read):
+    """The tests a run's output reports as failed or errored, as ids.
+
+    pytest's summary lines (FAILED id, ERROR id) and unittest's (FAIL: name (module.Class.name)) are
+    read. A file that failed to load (ERROR path, no ::) counts every test it defines, read with
+    `read(path)`: an import error must not hide which tests were lost.
+    """
+    found = set()
+    for kind, ident in re.findall(r"^(FAILED|ERROR) (\S+)", out, re.M):
+        if ident.startswith("("):                                 # unittest's closing "FAILED (errors=1)"
+            continue
+        ident = ident.split(" - ")[0]
+        if "::" in ident:
+            found.add(re.sub(r"\[.*\]$", "", ident))           # a parametrised case is its test
+        else:
+            found |= set(test_ids(ident, read(ident) or "")) or {ident}
+    for _kind, name, where in re.findall(r"^(FAIL|ERROR): (\w+) \(([\w.]+)\)", out, re.M):
+        found.add(where if where.endswith("." + name) else f"{where}.{name}")
+    return sorted(found)
+
+
+def matches(ident, entry):
+    """A test id against an entry the owner wrote: the whole id, its end, or the test's own name."""
+    return ident == entry or ident.endswith("::" + entry) or ident.endswith("." + entry) \
+        or ident.split("::")[-1].split(".")[-1] == entry
+
+
+def account_tests(failing, plan, texts):
+    """[(id, reason or None, problem or None)] for the branch's tests that fail against the series.
+
+    A test listed in the plan's "must_pass" cannot fail at all. Any other needs its reason, the
+    same way a change does: a plan "reasons" entry keyed by the id, or a sentence naming the test.
+    """
+    given, must = plan.get("reasons") or {}, plan.get("must_pass") or []
+    rows = []
+    for ident in failing:
+        name = re.split(r"::|\.", ident)[-1]
+        if any(matches(ident, entry) for entry in must):
+            rows.append((ident, None, f"MUST-PASS {ident}: the owner marked this test as one that must pass, and it fails"))
+            continue
+        reason = next((dict(source="plan reasons", text=given[k]) for k in (ident, f"test:{ident}", name) if k in given), None)
+        if reason is None:
+            hit = mentions(code_name(name), texts, 1)
+            reason = dict(source=hit[0][0], text=hit[0][1]) if hit else None
+        rows.append((ident, reason, None if reason else
+                     f"MISSING  {ident}: the branch's test fails against the series and nothing says why"))
+    return rows
+
+
 def gate(repo, a, b, plan, plan_dir):
     """(passed, rows, markdown) for the changes from `a` to `b`."""
     decisions_path = os.path.join(plan_dir, "decisions.json")
@@ -357,6 +426,27 @@ def self_test():
             ("only the two commits given are compared: the same file is added from the base, dropped from the branch",
              any(r["key"] == "requirements.txt" and r["fate"] == "added" for r in changes(repo, base, branch))),
         ]
+    run = ("FAILED tests/test_x.py::test_nan_is_null - AssertionError\nFAILED tests/test_x.py::test_rows[2] - x\n"
+           "ERROR tests/test_y.py - ImportError: cannot import name 'Gone'\n")
+    sources_ = {"tests/test_y.py": "def test_one():\n    pass\n\n\nclass TestTwo:\n    def test_two(self):\n        pass\n"}
+    failing = failing_tests(run, sources_.get)
+    unit = failing_tests("FAIL: test_a (pkg.tests.T.test_a)\nERROR: test_b (pkg.tests.T)\n\nFAILED (failures=1, errors=1)\n",
+                         lambda p: "")
+    tests = account_tests(failing, dict(must_pass=["test_nan_is_null"], reasons={"tests/test_y.py::test_one": "removed with Gone"}),
+                          [("deferred.md", "- `test_rows`: the row filter moved to the caller.\n")])
+    problems = {ident: problem for ident, _r, problem in tests}
+    checks += [
+        ("a failing test and a parametrised case are read by id",
+         "tests/test_x.py::test_nan_is_null" in failing and "tests/test_x.py::test_rows" in failing),
+        ("a file that fails to load counts every test it defines",
+         {"tests/test_y.py::test_one", "tests/test_y.py::TestTwo::test_two"} <= set(failing)),
+        ("unittest's failures are read too", unit == ["pkg.tests.T.test_a", "pkg.tests.T.test_b"]),
+        ("a must-pass test that fails is refused, whatever deferred.md says",
+         (problems.get("tests/test_x.py::test_nan_is_null") or "").startswith("MUST-PASS")),
+        ("another failing test passes with a sentence or a plan reason naming it",
+         problems["tests/test_x.py::test_rows"] is None and problems["tests/test_y.py::test_one"] is None),
+        ("a failing test nothing explains is MISSING", (problems["tests/test_y.py::TestTwo::test_two"] or "").startswith("MISSING")),
+    ]
     failed = sum(not ok for _n, ok in checks)
     for name, ok in checks:
         print(("ok   " if ok else "FAIL ") + name)
