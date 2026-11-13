@@ -28,10 +28,11 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: thirty-one situations in scratch repos;
+(`build_series.py --self-test`: thirty-three situations in scratch repos;
+`reasons.py --self-test`: what counts as a change and as its reason, 18 cases;
 `repo_map.py --self-test`: the focus map and the whole-tree map, 46 cases;
 `repo_index.py --self-test`: the stored graph and its retrieval, 14 cases;
-`review_site.py --self-test`: the review page, 14 cases).
+`review_site.py --self-test`: the review page, 17 cases).
 
 ## References: read the one the moment calls for
 
@@ -71,11 +72,44 @@ Say which mode you picked. "Make my branch pass review" is `pre-pr`: they
 want it fixed, not judged. A request naming no branch and no PR (a function,
 an uncommitted diff) is `review`, because `pre-pr` rewrites history.
 
-**When nobody can answer.** In an unattended run, every question the steps
-below say to ask becomes an open question in the PR description, verbatim.
-Every fact you would have asked for is written as the weaker sentence that
-is true without it. Landing proceeds unless the audit found a second author
-or a published branch; those wait. Never a guess dressed as a finding.
+## Two ways to run: interactive and automatic
+
+`pre-pr`, `write` and `audit` run one of two ways. Say which, and set it in
+the plan as `"run": "interactive"` or `"run": "auto"`.
+
+**Interactive** (the default when the owner is in the conversation): the
+owner sees every change and adopts it before anything moves. Stop at four
+points, and nowhere else:
+1. after step 1: show the problem statement's first paragraph; the owner
+   agrees or corrects it;
+2. after the first build: show every change with its reason. Generate the
+   page (`review_site.py $W --out $W/review.html`) and send it; ask about
+   the changes four to a question, each option naming the function, what
+   happens to it and the reason. The owner may also mark them on the page and
+   paste back what its "Copy decisions" button gives. Write the answers to
+   `$W/decisions.json`: `"adopt"`, `"reject"`, or their words for an edit.
+   Put a rejected change back the way the branch had it, make an asked-for
+   edit, rebuild, and show only what changed again;
+3. after the maintainer pass: show the verdict and each NAK with the fix you
+   propose; fixes that change behaviour are decided like any other change;
+4. before landing: the builder refuses while any change waits for a
+   decision, so landing is a question only when every change is adopted.
+
+**Automatic** (when the owner asks to be left out of it: "just do it", "run
+it end to end", "tell me when it's done", or a scheduled or unattended run):
+no questions. The steps run in order to the end: the problem statement is
+derived from the request and the branch; the maintainer pass is a fresh
+subagent, up to three rounds; the series lands when both gates pass, unless
+the audit found a second author or a published branch, which wait for the
+owner. Every question a step says to ask becomes an open question in the PR
+description, verbatim, and every fact you would have asked for is written as
+the weaker sentence that is true without it. Never a guess dressed as a
+finding. At the end, one message: the hand-back (step 8) with the review
+page, sent as a push notification as well when the harness has one. Nothing
+is pushed and no PR is opened in either way unless the owner asked.
+
+Both ways hold the same bar: the size gate and the reason gate decide what
+can land, not the way the pass was run.
 
 ## Ground rules
 
@@ -95,6 +129,12 @@ or a published branch; those wait. Never a guess dressed as a finding.
   comments" commit. The PR opens as the first posting.
 - What the problem does not need is recorded in `deferred.md`, not deleted
   silently.
+- **Every change has a reason.** Each function, method or class the series
+  adds, drops or rewrites relative to the branch, each module's own code that
+  changes, and each other file that differs is named, with why, in
+  `deferred.md`, in the message of the patch that makes it, or in the plan's
+  `reasons`. The builder lists the changes (`reasons.md`) and refuses to build
+  or land a series with one that has none.
 - Prefer deleting to modifying, and modifying to adding; search before
   writing. A second copy of an existing function is "we already have that".
 - **A risk is never fixed silently.** A security hole, a look-ahead leak, a
@@ -327,6 +367,9 @@ python3 $S/build_series.py $W/plan.json
 
 The build never moves the branch (building-and-landing.md section 5). Read
 what it prints:
+- **the reason table** (`reasons.md`): every change and the sentence that
+  justifies it; a MISSING row is a reason you owe, in `deferred.md`, the
+  patch's message or the plan's `reasons`, before the series can land;
 - **the size table** (`size.md`): every OVER file goes back to step 3;
 - **the residual**: every `-` line is in `deferred.md` or rewritten;
 - **the original tests** run against the rebuilt code: every failure is
@@ -383,9 +426,11 @@ and tell the user which.
 Run the entry point on the original and on the series where it runs
 offline, write `defence.md`, land with `build_series.py $W/plan.json
 --land`, and hand back. Each is in building-and-landing.md section 7 and 8.
-Landing refuses a series that failed the size gate. **Ask before landing**
-when the audit showed more than one author or a published branch; otherwise
-the request to clean the branch is the authorisation. The hand-back leads
+Landing refuses a series that failed the size gate or the reason gate, and,
+in an interactive run, one with a change the owner has not adopted. **Ask
+before landing** when the audit showed more than one author or a published
+branch; otherwise, in an automatic run, the request to clean the branch is
+the authorisation. The hand-back leads
 with the before/after size and ends with the undo command copied from
 `UNDO.md`. Give the owner the review page too: `python3 $S/review_site.py $W
 --out $W/review.html` draws the branch's call graph and the series' on one

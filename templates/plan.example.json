@@ -3,11 +3,15 @@
   "base": "<git merge-base origin/main feature/session-cache>",
   "onto": "origin/main",
   "source": "feature/session-cache",
+  "run": "interactive",
   "check": "PYTHONPATH=src /abs/path/.venv/bin/python -m pytest -q tests/test_cache.py tests/test_client.py",
   "import_check": "acme",
   "shrink": 0.5,
   "size_ok": {
     "src/acme/schema.py": "generated from schema.sql; reviewed there"
+  },
+  "reasons": {
+    "src/acme/client.py:<module>": "the requests import moved into the session helper"
   },
   "sign_off": false,
   "out": "series",

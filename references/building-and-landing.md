@@ -153,6 +153,9 @@ Per patch:
   (for a characterization test, or a second new test).
 
 Per plan:
+- `run`: `"interactive"` or `"auto"` (SKILL.md, "Two ways to run");
+- `reasons`: a reason for a change no sentence names, keyed `path:qual`,
+  `path:<module>` for a module's own code, or a path for a whole file;
 - `base`, `onto`, `source`, `check`, `import_check`, `stack`;
 - `scope_ok`, the reason for each file the branch never touched;
 - `size_ok`, the reason for each file exempt from the size gate;
@@ -193,7 +196,18 @@ Three of them change what you write:
 - A file the branch never touched needs `scope_ok`.
 - The size gate needs the rewrite, or a `size_ok` reason.
 
-Read three things it prints:
+Read four things it prints:
+
+- **The reason table**, also in `$W/reasons.md` (or any time:
+  `python3 $S/reasons.py $W/plan.json`): every change the series makes to the
+  branch, compared as syntax trees so reformatting alone is not one. Each
+  function, method or class added, dropped or rewritten; a module's own code;
+  a file whose other content differs. Its reason is the first sentence of
+  `deferred.md`, a patch's message or `defence.md` that names it as code
+  (`` `name` ``, `` `name()` ``, or name()), or the plan's `reasons` entry. A
+  MISSING row fails the build. In an interactive run each row also needs the
+  owner's decision in `$W/decisions.json`; `--land` re-reads that file, so
+  record the decisions and land without rebuilding.
 
 - **The size table**, also in `$W/size.md`: each OVER file goes back to the
   rewrite step (minimal-code.md), and each CRAMMED file is written out one
@@ -251,7 +265,9 @@ refuses:
 - tracked edits it would overwrite;
 - a branch whose code changed since the build;
 - a branch checked out in another worktree;
-- a series that failed the size gate.
+- a series that failed the size gate;
+- a change with no reason, a rejected change still in the series, and, in an
+  interactive run, a change the owner has not adopted.
 
 It writes `$W/UNDO.md`: the original tip, the one command that restores it
 from any branch, the files it kept as untracked copies, and what a published
@@ -293,7 +309,9 @@ they call or are called by, and the code elsewhere on the same subject
 (`repo_index.py`). Each function carries its fate (kept, rewritten, dropped,
 added by the series), its lines on both sides, the patch that changes it, and
 every sentence of `deferred.md`, the messages and `defence.md` that names it,
-so a function with no sentence is one the owner has to ask about. Below the
+so a function with no sentence is one the owner has to ask about. A change
+with no reason shows in red. In an interactive run each change has Adopt and
+Reject buttons, and "Copy decisions" gives the text for `decisions.json`. Below the
 graph: the calls that change, a table of every fate, the plan patch by patch
 (why, and how it was checked), the problem, the deferred list, the size table
 and the review rounds. `--fragment` leaves the document wrapper to a host

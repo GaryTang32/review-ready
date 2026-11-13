@@ -46,7 +46,21 @@ a branch you already have.
    still large after the rewrite, and writes a real commit message for each patch.
 6. **Reviews** it as a hostile stranger who has not seen your reasoning, and
    who must walk your failing case through the code by hand before an ACK.
-7. **Lands** it on your branch, once, with a one-command undo.
+7. **Lands** it on your branch, once, with a one-command undo, and hands you
+   a review page: the branch's call graph and the series' on one layout, each
+   function's fate and the sentence that justifies it.
+
+**Every change has a reason.** Each function the series adds, drops or
+rewrites, each module's own code that changes and each other file that
+differs is named, with why, in the pass's notes or commit messages. The
+builder lists every change and refuses to land a series where one has none.
+
+**Interactive or automatic.** Interactive, the default when you are in the
+conversation: you agree the problem statement, then see every change with its
+reason and adopt or reject it (in the chat or on the review page), and nothing
+lands until every change is adopted. Automatic ("just do it", "tell me when it's
+done"): no questions; the pass runs to the end, questions become open questions
+in the PR description, and you get one message when it is done.
 
 ## Your branch is safe
 
@@ -119,14 +133,15 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 31 whole situations in scratch repositories |
+| `build_series.py --self-test` | 33 whole situations in scratch repositories |
+| `reasons.py --self-test` | 18: what counts as a change, what counts as its reason, and an owner's adopt, reject and edit |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |
 | `comment_audit.py --self-test` | 17, eight of which must find nothing |
 | `repo_map.py --self-test` | 46: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
 | `repo_index.py --self-test` | 14: the stored graph, its queries and its retrieval, including a match that must not be offered |
-| `review_site.py --self-test` | 14: the review page from a scratch pass: fates, reasons, the patch of each function, calls that change, a closed tag for every open one |
+| `review_site.py --self-test` | 17: the review page from a scratch pass: fates, reasons, the patch of each function, calls that change, a closed tag for every open one |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts
