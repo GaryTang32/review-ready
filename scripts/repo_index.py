@@ -3,7 +3,7 @@
 
 usage:
   repo_index.py build   --repo R [--ref REF] [--src DIR]... [--db PATH]   index a commit (default HEAD)
-  repo_index.py search  "yahoo minute bars cache" [--top N]   what in the tree is about these words
+  repo_index.py search  "exchange rates cache" [--top N]      what in the tree is about these words
   repo_index.py about   path/to/file.py:qualname  [--top N]   what else is about the same thing as this
   repo_index.py callers NAME          who calls it, with the line
   repo_index.py callees NAME          what it calls
