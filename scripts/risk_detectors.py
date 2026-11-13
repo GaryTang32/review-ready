@@ -67,7 +67,9 @@ RISK_DETECTORS = [
      r"|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})", "security"),
     ("path joined with a value from data",
      r"\bos\.path\.join\([^)]*\b(row|rec|record|entry|item|req|request|payload|params|args)\s*[\[.]"
-     r"|/\s*(row|rec|record|entry|item|req|request|payload)\s*\[", "security"),
+     # pathlib's `/`, not a division: the left side has to be named like a path
+     r"|\b(Path\([^)]*\)|\w*(dir|path|root|folder|dest|base|out)\w*)\s*/\s*(row|rec|record|entry|item|req|request|payload)\s*\[",
+     "security"),
     ("predictable temp path",
      r"\btempfile\.mktemp\(|[\"']/tmp/[^\"']+[\"']", "security"),
     ("world-writable mode",
@@ -284,7 +286,7 @@ CASES = {
     "secret default in an env read": ('key = os.environ.get("VENDOR_API_KEY", "d41d8cd98f00b204")', 'key = os.environ["VENDOR_API_KEY"]'),
     "secret-bearing value in a log call": ('log.info("calling vendor with token %s", token)', 'log.info("calling vendor %s", vendor)'),
     "private key or known token prefix": ('key = "ghp_a1b2c3d4e5f6g7h8i9j0k1l2m3n4"', 'key = load_key()'),
-    "path joined with a value from data": ('dest = os.path.join(root, row["filename"])', 'dest = os.path.join(root, "prices.csv")'),
+    "path joined with a value from data": ('dest = out_dir / row["filename"]', 'ratio = row["close"] / row["open"]'),
     "predictable temp path": ('tmp = "/tmp/prices.csv"', 'fd, tmp = tempfile.mkstemp(dir=target.parent)'),
     "world-writable mode": ('os.chmod(path, 0o777)', 'os.chmod(path, 0o640)'),
     "package source changed": ('--extra-index-url https://pypi.vendor.example/simple', 'requests==2.31.0'),
