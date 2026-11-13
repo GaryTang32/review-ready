@@ -139,7 +139,13 @@ behaviour-switches.md section 4), not by default.
 - A risk fix: security, look-ahead, a silent NULL coercion. Each keeps its
   own patch and test (SKILL.md ground rules).
 - Error handling at a real boundary: I/O, the network, a subprocess, input
-  from a user or a vendor file.
+  from a user or a vendor file. A file the code reads may be hand-edited,
+  torn or empty, and a field in it may be null; if the branch handled that,
+  the series does too.
+- An output guarantee other programs rely on: JSON that a strict parser
+  accepts (NaN and infinity written as null), a CSV header that does not
+  change from run to run, an exit code. "The file we read does it the same
+  way" is not a reason when the output leaves the program.
 - The test that pins the behaviour change.
 - A name or a one-line comment that tells the reader *why*.
 - Behaviour the problem needs. If the rewrite cannot be half the length

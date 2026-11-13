@@ -35,7 +35,15 @@ you were told.
 6. After the last patch, judge the series: run the check at every commit and
    paste the table. Is anything in patch 3 that would have been smaller in
    patch 1? Does every `-` line of `residual.patch` appear in `deferred.md`?
-   A `-` line nobody accounts for is work the owner lost. Then `size.md`: for
+   A `-` line nobody accounts for is work the owner lost. Then read every
+   `behaviour` line of `deferred.md` as a cut you must approve, and **run**
+   each one that guards a boundary: the input a user or another program
+   hands the code (a malformed, empty, null or non-text file; NaN, infinity,
+   a missing field) and the output another program reads (valid JSON, a
+   stable CSV header, an exit code). Feed the series that input and read
+   what comes out. A crash, a traceback or output another tool rejects where
+   the branch handled it is a NAK: the guard comes back, in its shortest
+   form, with a test (minimal-code.md section 4). Then `size.md`: for
    the largest patch, write the shorter version you would accept, at least
    in outline. If it is clearly shorter and does the same job, that is a NAK
    under "Length", with your version as the fix required. Read every
