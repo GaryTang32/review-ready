@@ -1511,10 +1511,21 @@ def focus_map(repo, base, head, src_dirs):
             old_fp.setdefault(fp, key)
     old_sh.update({key: sh for key, sh in target_sh.items() if gained(key)})
     since_fork = {f"{rel}:{qual}" for rel, qual in set(target_shapes) | set(target_sh) if gained((rel, qual))}
+    # A copy has the same shape. Code on the same subject written another way has only its
+    # vocabulary in common, so the tree the series lands on is indexed by its words and asked.
+    try:
+        import sqlite3
+
+        import repo_index as ri
+        subjects = sqlite3.connect(":memory:")
+        ri.store_nodes(subjects, landed or old)
+    except ImportError:
+        ri = None
     refs = sum((m.refs for m in mods.values() if not m.is_test), Counter())
     placed = {(src_rel, caller, line) for src_rel, caller, _r, _q, line in edges}
 
     r = dict(fork=fork, head=head, target=base, moved=moved, changed=len(changed), inline=[], unused=[], test_only=[], dupes=[],
+             subject=[],
              one_method=[], functions=[], unresolved=0, unparsed=list(UNPARSED))
     for key in changed:
         rel, qual = key
@@ -1526,6 +1537,11 @@ def focus_map(repo, base, head, src_dirs):
                 if group == "dupes":
                     finding["landed"] = finding["shape"] in since_fork
                 r[group].append(finding)
+            copied = any(x["where"] == f"{rel}:{qual}" for x in r["dupes"])
+            if ri and not copied and d["name"] != "main" and not d["name"].startswith("__"):
+                for relevance, node, shared in ri.same_subject(subjects, *ri.definition_terms(mods[rel], d)[:2], top=1):
+                    r["subject"].append(dict(where=f"{rel}:{qual}", like=ri.where(subjects, node)[0],
+                                             relevance=relevance, shared=ri.readable(shared)))
         node = func_node(mods[rel], d) if d["kind"] != "class" else None
         if node is None:
             continue
@@ -1568,6 +1584,9 @@ def render_focus(r):
          lambda x: f"`{x['where']}`" + (f": {x['alike']:.0%} like `{x['shape']}`" if x["shape"] else "")
                    + (", which the target gained after the fork" if x.get("landed") else "")
                    + (f": same name as {', '.join(f'`{n}`' for n in x['name'])}" if x["name"] else "")),
+        ("Added, and the tree has code on the same subject: read it before keeping a second one (move 4). "
+         "Found by the words they share, so it is a lead to check, not a copy", r["subject"],
+         lambda x: f"`{x['where']}`: `{x['like']}` ({x['relevance']:.0%}; shares {', '.join(x['shared'])})"),
     ]
     for title, items, fmt in groups:
         if items:
@@ -1607,10 +1626,19 @@ SELF_TEST_BASE = {
     "pkg/old_home.py": "def moved(rows):\n    total = 0\n    count = 0\n    for row in rows:\n        if row:\n"
                        "            total += len(row)\n            count += 1\n    if not count:\n"
                        "        return 0\n    return total / count\n",
+    "pkg/rates.py": "import urllib.request\n\n\ndef fetch_exchange_rates(currency, cache_dir):\n"
+                    "    \"\"\"Download today's exchange rates for a currency and keep them in a cache file.\"\"\"\n"
+                    "    cache_file = cache_dir / f'{currency}_rates.json'\n    if cache_file.exists():\n"
+                    "        return cache_file.read_text()\n"
+                    "    body = urllib.request.urlopen(f'https://rates.example/{currency}').read()\n"
+                    "    cache_file.write_bytes(body)\n    return body\n",
     "tests/__init__.py": "",
     "tests/test_loader.py": "from pkg.loader import load\n\n\ndef test_load():\n    assert load(__file__)\n",
 }
 SELF_TEST_BRANCH = {
+    "pkg/fx.py": "import requests\n\n\ndef cached_rates(code, folder):\n    saved = folder / (code + '_rates.json')\n"
+                 "    if not saved.exists():\n        saved.write_text(requests.get('https://rates.example/' + code).text)\n"
+                 "    return saved.read_text()\n",
     "pkg/loader.py": "from pkg.fmt import Formatter\n\n\ndef load(path):\n    rows = [line for line in open(path)]\n"
                      "    return _strip(rows)\n\n\ndef _strip(rows):\n    return [Formatter().fmt(r) for r in rows]\n\n\n"
                      "def dedupe(rows):\n    seen = set()\n    kept = []\n    for row in rows:\n"
@@ -1788,6 +1816,8 @@ def self_test():
         ("a copy of a function the target gained after the fork is found",
          "`pkg/loader.py:mean_length`: 100% like `pkg/stats.py:average_size`, which the target gained after the fork"),
         ("a moved target is said so", "`main` has moved 1 commit(s) since the fork"),
+        ("code on the same subject, written differently, is found by its words",
+         "`pkg/fx.py:cached_rates`: `pkg/rates.py:fetch_exchange_rates` ("),
         ("the chain runs from the entry point down",
          "`pkg/cli.py:main` -> `pkg/pipeline.py:run` -> `pkg/loader.py:load`"),
         ("a caller is shown with the line that calls", "`pkg/pipeline.py:5`: `return len(load(path))`"),
