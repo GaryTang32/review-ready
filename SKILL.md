@@ -28,8 +28,8 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: thirty-three situations in scratch repos;
-`reasons.py --self-test`: what counts as a change and as its reason, 19 cases;
+(`build_series.py --self-test`: thirty-four situations in scratch repos;
+`reasons.py --self-test`: what counts as a change and as its reason, 25 cases;
 `repo_map.py --self-test`: the focus map and the whole-tree map, 46 cases;
 `repo_index.py --self-test`: the stored graph and its retrieval, 14 cases;
 `review_site.py --self-test`: the review page, 17 cases).
@@ -81,7 +81,8 @@ the plan as `"run": "interactive"` or `"run": "auto"`.
 owner sees every change and adopts it before anything moves. Stop at four
 points, and nowhere else:
 1. after step 1: show the problem statement's first paragraph; the owner
-   agrees or corrects it;
+   agrees or corrects it. Ask in the same question which tests must pass
+   whatever the rewrite does, and put them in the plan's `must_pass`;
 2. after the first build: show every change with its reason. Generate the
    page (`review_site.py $W --out $W/review.html`) and send it; ask about
    the changes four to a question, each option naming the function, what
@@ -103,7 +104,9 @@ subagent, up to three rounds; the series lands when both gates pass, unless
 the audit found a second author or a published branch, which wait for the
 owner. Every question a step says to ask becomes an open question in the PR
 description, verbatim, and every fact you would have asked for is written as
-the weaker sentence that is true without it. Never a guess dressed as a
+the weaker sentence that is true without it. `must_pass` holds every test the
+request names, and every test of the branch that pins a guard at a boundary
+(malformed input, NaN, an output format other programs read). Never a guess dressed as a
 finding. At the end, one message: the hand-back (step 8) with the review
 page, sent as a push notification as well when the harness has one. Nothing
 is pushed and no PR is opened in either way unless the owner asked.
@@ -135,6 +138,12 @@ can land, not the way the pass was run.
   `deferred.md`, in the message of the patch that makes it, or in the plan's
   `reasons`. The builder lists the changes (`reasons.md`) and refuses to build
   or land a series with one that has none.
+- **No test is lost silently.** Every test already on the target passes at
+  every patch, or the build stops. Each of the branch's own tests that fails
+  against the series is a change like any other and needs its reason; a test
+  file that does not even load counts every test in it. A test in the plan's
+  `must_pass` may not fail at all, whatever reason is offered: the builder runs
+  it, as the branch has it, against the series, and refuses the build.
 - Prefer deleting to modifying, and modifying to adding; search before
   writing. A second copy of an existing function is "we already have that".
 - **A risk is never fixed silently.** A security hole, a look-ahead leak, a
@@ -370,6 +379,10 @@ what it prints:
 - **the reason table** (`reasons.md`): every change and the sentence that
   justifies it; a MISSING row is a reason you owe, in `deferred.md`, the
   patch's message or the plan's `reasons`, before the series can land;
+- **the test table** (`tests.md`): each of the branch's tests that fails
+  against the series, with its reason, and every `must_pass` test's result;
+  a MUST-PASS row means the rewrite broke what the owner said must hold:
+  the fix goes in the series, never in the test;
 - **the size table** (`size.md`): every OVER file goes back to step 3;
 - **the residual**: every `-` line is in `deferred.md` or rewritten;
 - **the original tests** run against the rebuilt code: every failure is

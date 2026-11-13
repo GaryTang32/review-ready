@@ -55,6 +55,11 @@ rewrites, each module's own code that changes and each other file that
 differs is named, with why, in the pass's notes or commit messages. The
 builder lists every change and refuses to land a series where one has none.
 
+**No test is lost silently.** Tests already on your target pass at every
+commit. Each of your branch's own tests that fails against the rewrite needs a
+written reason, and the tests you mark as must-pass cannot fail at all: the
+builder runs them, as you wrote them, against the rewrite.
+
 **Interactive or automatic.** Interactive, the default when you are in the
 conversation: you agree the problem statement, then see every change with its
 reason and adopt or reject it (in the chat or on the review page), and nothing
@@ -133,8 +138,8 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 33 whole situations in scratch repositories |
-| `reasons.py --self-test` | 19: what counts as a change, what counts as its reason, and an owner's adopt, reject and edit |
+| `build_series.py --self-test` | 34 whole situations in scratch repositories |
+| `reasons.py --self-test` | 25: what counts as a change, what counts as its reason, and an owner's adopt, reject and edit |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |

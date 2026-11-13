@@ -159,6 +159,10 @@ Per plan:
   `path:qual`, `path:<module>` for a module's own code, or a path for a whole
   file. Read the reason table row by row: a sentence matches by naming the
   change, which is not the same as explaining it;
+- `must_pass`: tests that may not fail on the series, as pytest ids or a
+  test's name. The builder runs them as the branch has them, against the
+  series' code, and stops the build if one does not pass. Without pytest in
+  the interpreter, unittest runs the ones that are methods of a class;
 - `base`, `onto`, `source`, `check`, `import_check`, `stack`;
 - `scope_ok`, the reason for each file the branch never touched;
 - `size_ok`, the reason for each file exempt from the size gate;
@@ -199,7 +203,7 @@ Three of them change what you write:
 - A file the branch never touched needs `scope_ok`.
 - The size gate needs the rewrite, or a `size_ok` reason.
 
-Read four things it prints:
+Read five things it prints:
 
 - **The reason table**, also in `$W/reasons.md` (or any time:
   `python3 $S/reasons.py $W/plan.json`): every change the series makes to the
@@ -222,8 +226,11 @@ Read four things it prints:
   rewrites, line for line. A `-` line you cannot account for, in
   `deferred.md` or as a rewrite of the same behaviour, is a change you lost.
 - **The original tests**: the branch's own test files, run against the
-  rebuilt code. Every failure there is a deferred feature's test or a
-  behaviour you changed. Say which, one by one.
+  rebuilt code, and the `must_pass` tests (`$W/tests.md`). Each failing test
+  needs its reason, like a change: a sentence naming the test in
+  `deferred.md` or a message, or a plan `reasons` entry keyed by its id. One
+  that fails to import counts every test in its file. A `must_pass` test that
+  fails stops the build whatever the reason; the rewrite is what changes.
 
 Then measure: run `audit_diff.py --base <target> --head
 refs/review-ready/series/<branch>` into `audit-after.md`, and again after
@@ -270,7 +277,8 @@ refuses:
 - a branch checked out in another worktree;
 - a series that failed the size gate;
 - a change with no reason, a rejected change still in the series, and, in an
-  interactive run, a change the owner has not adopted.
+  interactive run, a change the owner has not adopted;
+- a failing `must_pass` test, or a failing test of the branch with no reason.
 
 It writes `$W/UNDO.md`: the original tip, the one command that restores it
 from any branch, the files it kept as untracked copies, and what a published

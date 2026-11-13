@@ -467,6 +467,7 @@ def load_review(folder, taken):
                 for r in rows if not any(n["key"] == r["key"] for n in out_nodes)],
         problem=markdown(read(folder, "problem.md")), letter=letter(read(folder, "cover-letter.md")),
         deferred=markdown(read(folder, "deferred.md")), defence=markdown(read(folder, "defence.md")),
+        tests=markdown(read(folder, "tests.md")),
         review=markdown(read(folder, os.path.basename(rounds[-1]))) if rounds else "")
 
 
@@ -1025,6 +1026,7 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
       <details open><summary>PR description</summary><div class="prose">${R.letter || '<p class="muted">No cover-letter.md yet.</p>'}</div></details>
       <details><summary>Review rounds (${R.verdicts.length})</summary>${rounds ? `<ul>${rounds}</ul>` : '<p class="muted">No review yet.</p>'}
         <div class="prose">${R.review}</div></details>
+      ${R.tests ? `<details ${/FAILED/.test(R.tests) ? "open" : ""}><summary>Tests: the branch's own, and the ones that must pass</summary><div class="prose">${R.tests}</div></details>` : ""}
       ${R.defence ? `<details><summary>Defence: the questions a maintainer will ask</summary><div class="prose">${R.defence}</div></details>` : ""}`;
   }
 
