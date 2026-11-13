@@ -72,7 +72,9 @@ In rough order of how much they usually save in agent code.
    that is `sum`, `any`, `all`, `max(key=)`, `sorted(key=)`, `dict.get`,
    `setdefault`, `Counter`, `defaultdict`, `itertools`, `pathlib`, `str.join`,
    or a pandas method. A function the tree already defines (`focus.md`:
-   "the tree already has it"). The shortest code is the code you call.
+   "the tree already has it" for a copy, "the tree has code on the same
+   subject" for one written differently; `repo_index.py search` for anything
+   else you are about to write). The shortest code is the code you call.
 5. **Data instead of branches.** An `if/elif` chain mapping a value to a
    value, or parallel branches differing in one constant, becomes a dict or a
    tuple of rows and one lookup.

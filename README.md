@@ -124,7 +124,8 @@ absent and reports green.
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |
 | `comment_audit.py --self-test` | 17, eight of which must find nothing |
-| `repo_map.py --self-test` | 45: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
+| `repo_map.py --self-test` | 46: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
+| `repo_index.py --self-test` | 14: the stored graph, its queries and its retrieval, including a match that must not be offered |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts

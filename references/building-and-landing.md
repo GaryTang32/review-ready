@@ -81,9 +81,30 @@ branch runs. "The tree already has it" compares with definitions that existed
 before the branch and still exist at its head, so a function the branch moved
 is not listed as a copy of its old self. When the target has moved since the
 fork it also compares with the functions the target gained in between, which
-the branch has never seen, and says so on the row. Run it again at the series
-head after the rewrite, if you want to see what the series still adds and
-whether anything single-use remains.
+the branch has never seen, and says so on the row. Its last list, "the tree has
+code on the same subject", is retrieval: each added function is described by
+the words in its name, its docstring and the packages it uses, and the tree
+the series lands on is ranked against them (BM25). A row names the words the
+two share. It is a lead, so open the function it names before acting; a row
+about a `main()` or a chart is usually only shared boilerplate. Run the map
+again at the series head after the rewrite, if you want to see what the
+series still adds and whether anything single-use remains.
+
+**The index** keeps what the map computes, for questions the report does not
+answer:
+
+```bash
+python3 $S/repo_index.py build --repo <repo> --ref <target>     # one SQLite file under .review-ready/
+python3 $S/repo_index.py search "download cache parquet"         # what in the tree is about these words
+python3 $S/repo_index.py about src/pkg/loader.py:load            # what else is about the same thing
+python3 $S/repo_index.py callers load                            # also: callees, reach [--up]
+python3 $S/repo_index.py sql "SELECT path, qual, lines FROM nodes WHERE dead IS NOT NULL ORDER BY lines DESC"
+```
+
+It reads the commit from git, never the checkout, records which commit it
+describes, and is opened read-only by every command but `build`. Rebuild it
+when the target moves. `export <dir>` writes `nodes.csv`, `edges.csv` and a
+`load.cypher` for a graph database; the skill itself needs none.
 
 ## 2. Where the tests run
 

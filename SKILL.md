@@ -28,8 +28,9 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: twenty-eight situations in scratch repos;
-`repo_map.py --self-test`: the focus map and the whole-tree map, 45 cases).
+(`build_series.py --self-test`: thirty-one situations in scratch repos;
+`repo_map.py --self-test`: the focus map and the whole-tree map, 46 cases;
+`repo_index.py --self-test`: the stored graph and its retrieval, 14 cases).
 
 ## References: read the one the moment calls for
 
@@ -136,7 +137,16 @@ with the line that calls it, what it calls, and the loops the branch wrote.
 It leads with the additions to act on: used once (inline them), never
 called, called only by tests, already in the tree, and classes with one
 method. It maps the neighbourhood, not the repo: steps 2 and 3 still change
-only what the branch wrote.
+only what the branch wrote. Its last list is retrieval, not matching: for each
+function the branch adds, the code already in the tree on the same subject,
+found by the words the two share. That is where "we already have one of
+these" shows when nothing was pasted.
+
+**Ask the tree instead of reading it.** `repo_index.py build --repo <repo>
+--ref <target>` stores the target's graph and vocabulary in one SQLite file
+under `.review-ready/`. Then `search "<words>"`, `about <file>:<function>`,
+`callers`, `callees`, `reach` and `sql` answer one question each without
+loading the tree into your context (building-and-landing.md section 1).
 
 **On a big branch, do not read the diff top to bottom.** Read the audit and
 the focus map, skip the noise classes entirely, then read files in order of
@@ -188,8 +198,9 @@ and ask whether the problem statement needs it. What goes:
    (comments.md); and type hints on code this change does not otherwise touch.
 5. Defensive code for states that cannot occur, `try/except` "just in case",
    broad excepts, anything that swallows an error.
-6. Duplicates of something the tree already has. The audit lists them; reuse
-   the original and say so in the message.
+6. Duplicates of something the tree already has. The audit lists copies and
+   the focus map lists code on the same subject; read the original, reuse
+   it, and say so in the message.
 7. Tests that assert the implementation, tests of trivial code, tests that
    assert nothing, mocks of the thing under test.
 8. Generated files, unrelated lockfile churn, notebook outputs, data files.
