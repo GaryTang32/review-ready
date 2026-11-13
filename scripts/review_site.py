@@ -47,6 +47,7 @@ from html.parser import HTMLParser
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import repo_map as rm  # noqa: E402  one parser and one resolver for the map, the index and the page
 from audit_diff import reviewable_lines  # noqa: E402  the size gate's own count
+import reasons as rs  # noqa: E402  the reason gate's own list of changes and their reasons
 
 try:
     import repo_index as ri
@@ -360,6 +361,26 @@ def load_review(folder, taken):
                 edges[(key, (path, qual), "similar")] = dict(before=node["before"], after=node["after"],
                                                              relevance=round(relevance, 2), shared=ri.readable(shared))
 
+    # The reason gate's view: every change from the branch to the series, its reason, the owner's decision.
+    compared = f"refs/review-ready/compared/{source}"
+    compared = compared if git(repo, "rev-parse", "--verify", "-q", compared, ok=True) else series
+    rows = rs.changes(repo, original, compared)
+    if compared == series and landed != sha["base"]:                 # rebased: keep the files the pass is about
+        touched = set(git(repo, "diff", "--name-only", base, original).split()) | set(git(repo, "diff", "--name-only", landed, series).split())
+        rows = [r for r in rows if r["path"] in touched]
+    decisions_path = os.path.join(folder, "decisions.json")
+    decisions = json.load(open(decisions_path)) if os.path.exists(decisions_path) else {}
+    rows, _problems = rs.account(rows, plan, rs.sources(plan, folder), decisions)
+    change_of = {r["key"]: r for r in rows}
+
+    def change_for(key):
+        """The gate's row for a definition: its own, or its class's when the class came or went whole."""
+        qual = key[1] or rs.MODULE
+        row = change_of.get(f"{key[0]}:{qual}")
+        if row is None and "." in qual:
+            row = change_of.get(f"{key[0]}:{qual.rsplit('.', 1)[0]}")
+        return row
+
     # Reasons: every sentence of the pass's own files that names the definition.
     texts = [("deferred.md", read(folder, "deferred.md"))]
     texts += [(f"message {i + 1}", git(repo, "log", "-1", "--format=%B", c)) for i, c in enumerate(commits)]
@@ -391,7 +412,10 @@ def load_review(folder, taken):
             d = definition(mods, key)
             sides[side] = dict(line=d["line"], lines=d["end"] - d["line"] + 1) if d else None
         kind = (definition(after_mods, key) or definition(before_mods, key) or {}).get("kind", "function")
+        row = change_for(key) if n["role"] == "focus" else None
         out_nodes.append(dict(
+            key=row["key"] if row else None, change=bool(row), reason=row["reason"] if row else None,
+            decision=row.get("decision") if row else None,
             id=index[key], path=key[0], qual=key[1], label=key[1] or "module code", kind=kind, role=n["role"],
             status=n["status"], test=n["test"], before=sides["before"], after=sides["after"],
             col=column_of.get(key[0], len(columns) - 1), patch=patch_of.get(key),
@@ -427,6 +451,8 @@ def load_review(folder, taken):
         slug=slug(source, taken), title=title, branch=source, onto=onto, sha=sha, start=start,
         nodes=out_nodes, edges=out_edges, columns=columns, patches=patches,
         stats=dict(
+            changes=len(rows), reasoned=sum(1 for r in rows if r["reason"]),
+            decided=sum(1 for r in rows if r.get("decision") == "adopt"),
             lines=[sum(lines_b.values()), sum(lines_a.values())],
             functions=[sum(1 for n in code if n["before"]), sum(1 for n in code if n["after"])],
             fates={s: sum(1 for n in code if n["status"] == s) for s in ("kept", "rewritten", "restored", "dropped", "new")},
@@ -436,7 +462,9 @@ def load_review(folder, taken):
             tree=dict(modules=len(after_mods), definitions=sum(len(m.defs) for m in after_mods.values()), calls=len(after_edges))),
         size=[dict(path=p, before=lines_b.get(p, 0), after=lines_a.get(p, 0), exempt=(plan.get("size_ok") or {}).get(p))
               for p in sorted(set(lines_b) | set(lines_a), key=lambda p: (-lines_b.get(p, 0), p))],
-        where=where, verdicts=verdicts,
+        where=where, verdicts=verdicts, run=plan.get("run") or "auto",
+        others=[dict(key=r["key"], kind=r["kind"], fate=r["fate"], reason=r["reason"], decision=r.get("decision"))
+                for r in rows if not any(n["key"] == r["key"] for n in out_nodes)],
         problem=markdown(read(folder, "problem.md")), letter=letter(read(folder, "cover-letter.md")),
         deferred=markdown(read(folder, "deferred.md")), defence=markdown(read(folder, "defence.md")),
         review=markdown(read(folder, os.path.basename(rounds[-1]))) if rounds else "")
@@ -632,6 +660,18 @@ details { background: var(--surface); border: 1px solid var(--line); border-radi
 details > summary { cursor: pointer; font-weight: 600; font-family: var(--display) }
 details[open] > summary { margin-bottom: 8px }
 footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line); padding-top: 14px }
+.reason.missing { border-color: var(--dropped); background: var(--dropped-soft); padding: 6px 10px; border-radius: 0 6px 6px 0 }
+.reason.given { border-color: var(--new) }
+.decide { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--surface) }
+.decide button { border: 0; background: transparent; padding: 4px 10px; font-size: .8rem; cursor: pointer; color: var(--ink-2) }
+.decide button + button { border-left: 1px solid var(--line) }
+.decide button[aria-pressed="true"][data-choice="adopt"] { background: var(--new-soft); color: var(--ink); font-weight: 600 }
+.decide button[aria-pressed="true"][data-choice="reject"] { background: var(--dropped-soft); color: var(--ink); font-weight: 600 }
+.decisions { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: grid; gap: 10px }
+.decisions textarea { width: 100%; min-height: 7em; font: .8rem/1.45 var(--mono); background: var(--sunk); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px }
+.decisions .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center }
+.btn { border: 1px solid var(--ink); background: var(--ink); color: var(--bg); border-radius: 8px; padding: 7px 14px; cursor: pointer; font-weight: 600 }
 </style>
 
 <div class="page">
@@ -670,9 +710,12 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
 
   <section class="block" aria-labelledby="fates-title">
     <div class="block-head"><div><h2 id="fates-title">Every function, its fate and the reason</h2>
-      <p>The same information as the graph, as a table. The reason is the first sentence in the pass's own files that names the function.</p></div></div>
+      <p>The same information as the graph, as a table. Every change needs a reason: a sentence of the pass's own files that names it, or an entry in the plan. The builder refuses a series with a change that has none.</p></div></div>
     <div class="table-wrap" id="fates"></div>
+    <div id="others"></div>
   </section>
+
+  <section class="block" id="decisions" hidden></section>
 
   <section class="block" aria-labelledby="plan-title">
     <div class="block-head"><div><h2 id="plan-title">The plan, patch by patch</h2>
@@ -699,7 +742,33 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
   };
   const ORDER = { dropped: 0, new: 1, rewritten: 2, restored: 3, kept: 4, unchanged: 5 };
   const COL_W = 236, GAP = 92, NH = 44, VG = 10, TOP = 44, PX = 14;
-  let R = null, view = "changes", selected = null;
+  let R = null, view = "changes", selected = null, choice = {};
+  const store = () => `review-ready:${R.slug}:${R.sha.series}`;
+  function loadChoices() {
+    choice = {};
+    R.nodes.concat(R.others).forEach((c) => { if (c.key && c.decision) choice[c.key] = c.decision; });
+    try { Object.assign(choice, JSON.parse(localStorage.getItem(store()) || "{}")); } catch (e) { /* storage is optional */ }
+  }
+  function saveChoices() { try { localStorage.setItem(store(), JSON.stringify(choice)); } catch (e) { /* storage is optional */ } }
+  const changesList = () => {
+    const seen = new Set(), out = [];
+    R.nodes.filter((n) => n.change).concat(R.others).forEach((c) => { if (c.key && !seen.has(c.key)) { seen.add(c.key); out.push(c); } });
+    return out;
+  };
+  const interactive = () => R.run === "interactive";
+  function decideControl(key) {
+    if (!interactive() || !key) return "";
+    const now = choice[key];
+    return `<span class="decide" role="group" aria-label="Decision on ${esc(key)}">
+      <button type="button" data-decide="${esc(key)}" data-choice="adopt" aria-pressed="${now === "adopt"}">Adopt</button>
+      <button type="button" data-decide="${esc(key)}" data-choice="reject" aria-pressed="${now === "reject"}">Reject</button></span>`;
+  }
+  function reasonBox(c) {
+    if (!c.change && c.reason === undefined) return "";
+    return c.reason ? `<div class="reason given"><span class="src">reason · ${esc(c.reason.source)}</span>${inlineCode(c.reason.text)}</div>`
+      : `<div class="reason missing"><span class="src">no reason</span>No sentence names this change and the plan gives no reason. The builder will not land the series until one is written.</div>`;
+  }
+  function inlineCode(t) { return esc(t).replace(/`([^`]+)`/g, "<code>$1</code>"); }
 
   const name = (n) => n.qual ? n.qual : n.path.split("/").pop();
   const where = (n) => n.qual ? `${n.path}:${n.qual}` : n.path;
@@ -713,6 +782,7 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
     const want = location.hash.slice(1);
     R = DATA.reviews.find((r) => r.slug === want) || DATA.reviews[0];
     selected = R.start;
+    loadChoices();
     render();
   }
 
@@ -720,11 +790,17 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
     $("tabs").innerHTML = DATA.reviews.length < 2 ? "" : DATA.reviews.map((r) =>
       `<a href="#${r.slug}" ${r === R ? 'aria-current="page"' : ""}>${esc(r.branch.split("/").pop())}</a>`).join("");
     renderIntro(); renderTiles(); renderWhere(); renderLegend(); renderGraph(); renderPanel();
-    renderLinks(); renderFates(); renderPlan(); renderStory(); renderSize(); renderEvidence(); renderFooter();
+    renderLinks(); renderFates(); renderDecisions(); renderPlan(); renderStory(); renderSize(); renderEvidence(); renderFooter();
   }
 
   function renderIntro() {
     const s = R.stats, last = R.verdicts[R.verdicts.length - 1];
+    const missing = s.changes - s.reasoned;
+    const reasons = missing ? `<span class="chip bad">${missing} of ${s.changes} changes have no reason</span>`
+      : `<span class="chip good">All ${s.changes} changes have a reason</span>`;
+    const decided = changesList().filter((c) => choice[c.key]).length;
+    const run = interactive() ? `<span class="chip ${decided === s.changes ? "good" : "wait"}">Interactive run: ${decided} of ${s.changes} decided</span>`
+      : `<span class="chip plain">Automatic run</span>`;
     const gate = s.gate === true ? `<span class="chip good">Size gate passed</span>` : s.gate === false
       ? `<span class="chip bad">Size gate not met</span>` : "";
     const review = !last ? `<span class="chip plain">Not reviewed yet</span>`
@@ -735,7 +811,7 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
       <div class="refs"><span>branch as written <code>${esc(R.sha.original.slice(0, 10))}</code></span>
         <span>forked at <code>${esc(R.sha.base.slice(0, 10))}</code></span>
         <span>series <code>${esc(R.sha.series.slice(0, 10))}</code> on <code>${esc(R.onto)}</code> at <code>${esc(R.sha.landed.slice(0, 10))}</code></span></div>
-      <div class="chips">${gate}${review}<span class="chip plain">${R.patches.length} patch${R.patches.length > 1 ? "es" : ""}</span></div>`;
+      <div class="chips">${gate}${reasons}${review}${run}<span class="chip plain">${R.patches.length} patch${R.patches.length > 1 ? "es" : ""}</span></div>`;
   }
 
   function tile(label, pair, note) {
@@ -856,9 +932,10 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
     }).join("");
     $("panel").innerHTML = `<div><p class="eyebrow"><span class="pill ${n.status}">${esc(FATE[n.status])}</span></p>
         <h3>${esc(n.role === "focus" ? n.label : name(n))}</h3><p class="path">${esc(n.path)}</p></div>
+      ${n.change ? reasonBox(n) : ""}${n.change && interactive() ? `<div>${decideControl(n.key)}</div>` : ""}
       <dl class="facts"><dt>Branch</dt><dd>${lines(n.before)}</dd><dt>Series</dt><dd>${lines(n.after)}</dd>
         ${n.role === "focus" ? `<dt>Patch</dt><dd>${patch}</dd>` : ""}</dl>
-      ${reasons || review || similar ? "" : n.role === "focus" ? `<p class="muted" style="margin:0">No file of the pass names this one; its fate follows from the code alone.</p>` : ""}
+      ${reasons || review || similar || n.change ? "" : n.role === "focus" ? `<p class="muted" style="margin:0">Not changed by the series.</p>` : ""}
       ${reasons}${review}${similar}
       <div><p class="eyebrow">Called by</p>${linkList(callers)}</div>
       <div><p class="eyebrow">Calls</p>${linkList(calls)}</div>`;
@@ -884,12 +961,34 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
   function renderFates() {
     const rows = R.nodes.filter((n) => n.role === "focus" && n.kind !== "module" && n.status !== "unchanged")
       .sort((a, b) => (a.test - b.test) || (ORDER[a.status] - ORDER[b.status]) || a.id - b.id);
-    $("fates").innerHTML = `<table><thead><tr><th>Function</th><th>Fate</th><th class="num">Branch</th><th class="num">Series</th><th>Patch</th><th>Reason</th></tr></thead><tbody>
+    $("fates").innerHTML = `<table><thead><tr><th>Function</th><th>Fate</th><th class="num">Branch</th><th class="num">Series</th><th>Patch</th><th>Reason</th>${interactive() ? "<th>Decision</th>" : ""}</tr></thead><tbody>
       ${rows.map((n) => `<tr><td><button type="button" class="go" data-go="${n.id}">${esc(n.label)}</button><div class="muted" style="font-size:.78rem">${esc(n.path)}</div></td>
         <td><span class="pill ${n.status}">${esc(FATE[n.status])}</span></td>
         <td class="num">${n.before ? n.before.lines : "–"}</td><td class="num">${n.after ? n.after.lines : "–"}</td>
         <td class="num">${n.patch != null ? `${n.patch + 1}/${R.patches.length}` : "–"}</td>
-        <td>${n.notes.length ? n.notes[0][1] : `<span class="muted">${n.test ? "test" : "no sentence names it"}</span>`}</td></tr>`).join("")}</tbody></table>`;
+        <td>${n.reason ? `${inlineCode(n.reason.text)}<div class="muted" style="font-size:.76rem">${esc(n.reason.source)}</div>`
+          : n.change ? '<span class="pill dropped">No reason</span>' : '<span class="muted">not a change</span>'}</td>
+        ${interactive() ? `<td>${n.change ? decideControl(n.key) : ""}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+    $("others").innerHTML = !R.others.length ? "" : `<h3>Changes outside functions</h3><div class="table-wrap"><table><thead><tr><th>Change</th><th>Kind</th><th>Fate</th><th>Reason</th>${interactive() ? "<th>Decision</th>" : ""}</tr></thead><tbody>
+      ${R.others.map((c) => `<tr><td><code>${esc(c.key)}</code></td><td>${esc(c.kind)}</td><td><span class="pill ${c.fate === "added" ? "new" : c.fate}">${esc(c.fate)}</span></td>
+        <td>${c.reason ? `${inlineCode(c.reason.text)}<div class="muted" style="font-size:.76rem">${esc(c.reason.source)}</div>` : '<span class="pill dropped">No reason</span>'}</td>
+        ${interactive() ? `<td>${decideControl(c.key)}</td>` : ""}</tr>`).join("")}</tbody></table></div>`;
+  }
+
+  function renderDecisions() {
+    const box = $("decisions");
+    box.hidden = !interactive();
+    if (!interactive()) { box.innerHTML = ""; return; }
+    const all = changesList(), decided = all.filter((c) => choice[c.key]);
+    const json = JSON.stringify(Object.fromEntries(all.filter((c) => choice[c.key]).map((c) => [c.key, choice[c.key]])), null, 1);
+    box.innerHTML = `<div class="decisions"><div class="block-head"><div><h2>Your decisions</h2>
+        <p>Adopt or reject each change above. When you are done, copy the decisions and paste them back in the conversation: they become
+        <code>decisions.json</code>, a rejected change is put back the way your branch had it, and nothing lands until every change is adopted.</p></div></div>
+      <div class="row"><strong>${decided.length} of ${all.length} decided</strong>
+        <span class="muted">${decided.filter((c) => choice[c.key] === "adopt").length} adopted, ${decided.filter((c) => choice[c.key] === "reject").length} rejected</span>
+        <button type="button" class="btn" id="copy-decisions">Copy decisions</button><span id="copied" class="muted" aria-live="polite"></span></div>
+      <label class="muted" for="decisions-text" style="font-size:.8rem">decisions.json</label>
+      <textarea id="decisions-text" readonly>${esc(json)}</textarea></div>`;
   }
 
   function renderPlan() {
@@ -942,6 +1041,21 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
 
   document.addEventListener("click", (ev) => {
     const go = ev.target.closest("[data-go]"), node = ev.target.closest(".node"), viewBtn = ev.target.closest("[data-view]"), patch = ev.target.closest("[data-patch]");
+    const decide = ev.target.closest("[data-decide]"), copy = ev.target.closest("#copy-decisions");
+    if (decide) {
+      const key = decide.dataset.decide;
+      choice[key] = choice[key] === decide.dataset.choice ? undefined : decide.dataset.choice;
+      if (!choice[key]) delete choice[key];
+      saveChoices(); renderIntro(); renderPanel(); renderFates(); renderDecisions();
+      return;
+    }
+    if (copy) {
+      const text = $("decisions-text");
+      const done = (msg) => { $("copied").textContent = msg; };
+      navigator.clipboard?.writeText(text.value).then(() => done("Copied"), () => { text.select(); done("Select the text below and copy it"); })
+        ?? (text.select(), done("Select the text below and copy it"));
+      return;
+    }
     if (viewBtn) { view = viewBtn.dataset.view; renderLegend(); renderGraph(); return; }
     if (patch) { document.getElementById(`patch-${patch.dataset.patch}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     if (node) { select(node.dataset.id); return; }
@@ -1018,7 +1132,9 @@ def self_test():
         write({"pkg/core.py": "def checkout_only():\n    return 0\n"})          # uncommitted: must not be read
         w = os.path.join(repo, ".review-ready", "feature")
         os.makedirs(os.path.join(w, "msgs"))
-        files = {"plan.json": json.dumps(dict(repo="../..", base=base, onto="main", source="feature", patches=[dict(name="count")])),
+        files = {"plan.json": json.dumps(dict(repo="../..", base=base, onto="main", source="feature", run="interactive",
+                                              patches=[dict(name="count")])),
+                 "decisions.json": json.dumps({"pkg/core.py:_strip": "adopt"}),
                  "deferred.md": "# Deferred\n\n## noise\n- `_strip()`: one caller; inlined into `load()`.\n",
                  "problem.md": "# Problem\n\nNothing counts the rows of a file.\n",
                  "cover-letter.md": "[PATCH 0/1] core: count the rows of a file\n\nProblem.\n\nSeries:\n  1/1 core: count rows (+4/-1)\n",
@@ -1052,6 +1168,11 @@ def self_test():
             ("a test's call to the code is drawn", bool(edge("test_count", "count_rows"))),
             ("the size comes from git, the gate's count", data["stats"]["lines"][0] > data["stats"]["lines"][1] > 0),
             ("the last review's verdict is read", data["verdicts"][-1]["verdict"] == "ACK"),
+            ("each change carries the reason the gate found", (nodes["_strip"].get("reason") or {}).get("source") == "deferred.md"),
+            ("a change nothing explains shows as missing", nodes["count_rows"]["change"] and nodes["count_rows"]["reason"] is None
+             and data["stats"]["reasoned"] < data["stats"]["changes"]),
+            ("an interactive run shows the owner's recorded decisions",
+             data["run"] == "interactive" and nodes["_strip"]["decision"] == "adopt" and nodes["load"]["decision"] is None),
             ("the checkout is never read", "checkout_only" not in text),
             ("every tag is closed", not checker.errors and not checker.stack),
             ("nothing in the data can end the script early", "</script" not in text.split('id="review-data">', 1)[1].split("</script>", 1)[0]),
