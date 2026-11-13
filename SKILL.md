@@ -28,7 +28,7 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: thirty-five situations in scratch repos;
+(`build_series.py --self-test`: thirty-six situations in scratch repos;
 `reasons.py --self-test`: what counts as a change and as its reason, 25 cases;
 `repo_map.py --self-test`: the focus map and the whole-tree map, 46 cases;
 `repo_index.py --self-test`: the stored graph and its retrieval, 14 cases;
@@ -106,7 +106,10 @@ owner. Every question a step says to ask becomes an open question in the PR
 description, verbatim, and every fact you would have asked for is written as
 the weaker sentence that is true without it. `must_pass` holds every test the
 request names, and every test of the branch that pins a guard at a boundary
-(malformed input, NaN, an output format other programs read). Never a guess dressed as a
+(malformed input, NaN, an output format other programs read). A guard test
+that imports a name the rewrite removes cannot run as the branch has it:
+port it to the series' names in the series' own tests, keep the input and
+the expected outcome, and name both tests in the reason. Never a guess dressed as a
 finding. At the end, one message: the hand-back (step 8) with the review
 page, sent as a push notification as well when the harness has one. Nothing
 is pushed and no PR is opened in either way unless the owner asked.

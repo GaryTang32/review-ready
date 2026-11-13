@@ -230,8 +230,13 @@ def last_line(out):
 
 
 def errored_not_asserted(out):
-    """True when a test run failed by error (import, name, missing runner), not by assertion."""
+    """True when a test run failed by error (import, name, a TypeError in setup), not by assertion."""
     if re.search(r"No module named|ModuleNotFoundError|ImportError|AttributeError: .*has no attribute|not found", out):
+        return True
+    # pytest prints the exception a test ended on as "E   <Type>Error: ...": anything but an assertion
+    # means the test never reached what it checks.
+    raised = set(re.findall(r"^E\s+(\w+(?:Error|Exception))\b", out, re.M))
+    if raised and not ({"AssertionError"} & raised or re.search(r"^E\s+assert ", out, re.M)):
         return True
     return bool(re.search(r"errors=\d+", out)) and not re.search(r"failures=\d+", out)
 
@@ -772,6 +777,9 @@ def build(args, plan, plan_dir, resolve):
         if check and differs:
             git(wt, "checkout", files_from, "--", *differs)
             state, out = shell(check, wt, timeout, None)
+            if re.search(r"Interrupted: \d+ errors? during collection", out):
+                # pytest stops at a file that does not load, and every other file goes unrun: run them all.
+                state, out = shell(f"{check} --continue-on-collection-errors", wt, timeout, None)
             git(wt, "reset", "-q", "--hard", "HEAD")
             git(wt, "clean", "-xdfq", ok=True)
             report = os.path.join(plan_dir, "original-tests.txt")
@@ -786,6 +794,9 @@ def build(args, plan, plan_dir, resolve):
                 failing = rs.failing_tests(out, lambda path: git(top, "show", f"{files_from}:{path}", ok=True))
                 test_rows = rs.account_tests(failing, plan, rs.sources(plan, plan_dir))
                 test_problems += [problem for _id, _reason, problem in test_rows if problem]
+                if re.search(r"Interrupted: \d+ errors? during collection", out):
+                    test_problems.append("UNREAD   pytest stopped at a file that does not load and the other test files "
+                                         f"never ran, even with --continue-on-collection-errors: see {report}")
                 if not failing:
                     test_problems.append(f"UNREAD   the branch's tests {state} against the series, and no failing test "
                                          f"could be read from the output: see {report}")

@@ -594,6 +594,15 @@ def write_mode_makes_a_new_branch_and_lands_nothing(tmp):
     assert rc != 0, out
 
 
+@case
+def a_test_that_raises_before_its_assertion_is_called_an_error(tmp):
+    sys.path.insert(0, HERE)
+    import build_series as b
+    typed = "    def test_x():\n>       Config(patience=2)\nE       TypeError: unexpected keyword 'patience'\nFAILED t.py::test_x\n"
+    asserted = "E       assert 3 == 2\nFAILED t.py::test_x\n"
+    assert b.errored_not_asserted(typed) and not b.errored_not_asserted(asserted)
+
+
 def main():
     failed = 0
     for fn in CASES:
