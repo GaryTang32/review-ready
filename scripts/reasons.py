@@ -370,8 +370,10 @@ def main():
     source = plan.get("source")
     a = args.a or (f"refs/review-ready/original/{source}" if source and git(repo, "rev-parse", "-q", "--verify",
                    f"refs/review-ready/original/{source}", ok=True) else source or plan["base"])
-    b = args.b or (f"refs/review-ready/series/{source}" if source else plan["branch"])
-    if source and not args.b:
+    compared = f"refs/review-ready/compared/{source or plan.get('branch')}"
+    b = args.b or (compared if git(repo, "rev-parse", "-q", "--verify", compared, ok=True)
+                   else f"refs/review-ready/series/{source}" if source else plan["branch"])
+    if source and not args.b and b != compared:
         # The series may have been rebased onto the target: compare its own commits, on the branch's base.
         a_tree = git(repo, "merge-base", plan.get("onto") or plan["base"], b).strip()
         if a_tree != git(repo, "rev-parse", plan["base"]).strip():
