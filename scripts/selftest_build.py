@@ -65,6 +65,7 @@ def repo(tmp, name, target_moves=False, conflict=False):
         write(r, "f.py", text); sh(r, "git", "commit", "-qam", "main moves on")
     k = os.path.join(r, ".review-ready")
     write(k, "msgs/01.txt", MSG); write(k, "overlays/01/f.py", CLEAN_F)
+    write(k, "deferred.md", "# Deferred\n\n## noise\n- `junk()`: a debug print nothing calls; dropped.\n")
     return r
 
 
@@ -347,7 +348,7 @@ def every_round_is_measured_against_the_users_branch(tmp):
 def a_later_overlay_that_undoes_an_earlier_fix_is_reported(tmp):
     r = repo(tmp, "t"); k = os.path.join(r, ".review-ready")
     write(k, "overlays/01/f.py", CLEAN_F.replace("def func1(rows):\n", "def func1(rows):\n    assert rows is not None\n"))
-    write(k, "overlays/02/f.py", CLEAN_F + "\n\nTWO = 2\n"); write(k, "msgs/02.txt", MSG.replace("count the rows", "add TWO for"))
+    write(k, "overlays/02/f.py", CLEAN_F + "\n\nTWO = 2\n"); write(k, "msgs/02.txt", MSG.replace("count the rows", "add `TWO` for"))
     path = plan(r); p = json.load(open(path))
     p["patches"].append({"name": "two", "message": "msgs/02.txt", "overlay": {"f.py": "overlays/02/f.py"}})
     json.dump(p, open(path, "w"))
@@ -378,7 +379,7 @@ def a_line_rewritten_by_a_later_patch_is_not_a_revert(tmp):
 @case
 def a_stack_is_cut_at_landing(tmp):
     r = repo(tmp, "u"); k = os.path.join(r, ".review-ready")
-    write(k, "overlays/02/f.py", CLEAN_F + "\n\nTWO = 2\n"); write(k, "msgs/02.txt", MSG.replace("count the rows", "add TWO for"))
+    write(k, "overlays/02/f.py", CLEAN_F + "\n\nTWO = 2\n"); write(k, "msgs/02.txt", MSG.replace("count the rows", "add `TWO` for"))
     path = plan(r, stack=[{"branch": "feature-1", "through": 1}]); p = json.load(open(path))
     p["patches"].append({"name": "two", "message": "msgs/02.txt", "overlay": {"f.py": "overlays/02/f.py"}})
     p["scope_ok"] = {}
@@ -457,6 +458,9 @@ def joining_statements_to_halve_the_line_count_does_not_pass_the_gate(tmp):
     assert rc != 0 and "SIZE GATE FAILED" in out and "CRAMMED" in out and "share a line" in out, out
     assert build(r, "--land")[0] != 0
     p["size_ok"] = {"parse.py": "the owner wants these on one line each"}; json.dump(p, open(path, "w"))
+    rc, out = build(r)                                   # exempt from the size gate, but the change still needs its reason
+    assert rc != 0 and "MISSING  parse.py (comments and layout" in out, out
+    p["reasons"] = {"parse.py": "the comments restated each line"}; json.dump(p, open(path, "w"))
     assert build(r)[0] == 0
 
 
@@ -493,6 +497,38 @@ def deleting_blank_lines_does_not_pass_the_gate(tmp):
                     "--md", md], capture_output=True, text=True, env=ENV)
     gate = re.search(r"Total outside `size_ok`: (\d+) ->", open(os.path.join(k, "size.md")).read()).group(1)
     assert f"**{gate}** non-blank lines" in open(md).read(), (gate, open(md).read()[:1500])
+
+
+@case
+def a_change_without_a_reason_cannot_land(tmp):
+    r = repo(tmp, "rg"); k = os.path.join(r, ".review-ready")
+    write(k, "deferred.md", "# Deferred\n")                       # nothing says why junk() goes
+    tip = sh(r, "git", "rev-parse", "feature")
+    rc, out = build(r)
+    assert rc != 0 and "MISSING  f.py:junk (function, dropped)" in out and "REASON GATE FAILED" in out, out
+    assert "f.py:junk" in open(os.path.join(k, "reasons.md")).read()
+    rc, out = build(r, "--land")
+    assert rc != 0 and sh(r, "git", "rev-parse", "feature") == tip, out
+    rc, out = build(r, reasons={"f.py:junk": "a debug print nothing calls"})
+    assert rc == 0 and "2 of 2 change(s) to the branch have a reason" in out, out
+
+
+@case
+def an_interactive_run_lands_only_what_the_owner_adopted(tmp):
+    r = repo(tmp, "ri"); k = os.path.join(r, ".review-ready")
+    rc, out = build(r, run="interactive")
+    assert rc == 0 and "WAITING  f.py:junk" in out, "waiting for the owner is not a build failure:\n" + out
+    rc, out = build(r, "--land")
+    assert rc != 0 and "WAITING" in out, out
+    write(k, "decisions.json", json.dumps({"f.py:func1": "adopt", "f.py:junk": "reject"}))
+    rc, out = build(r, "--land")                                  # rejected, yet the series still drops it
+    assert rc != 0 and "REJECTED f.py:junk" in out, out
+    write(k, "decisions.json", json.dumps({"f.py:func1": "adopt", "f.py:junk": "keep it, but rename it debug()"}))
+    rc, out = build(r, "--land")
+    assert rc != 0 and "EDIT     f.py:junk" in out, out
+    write(k, "decisions.json", json.dumps({"f.py:func1": "adopt", "f.py:junk": "adopt"}))
+    rc, out = build(r, "--land")                                  # decisions are re-read: no rebuild needed
+    assert rc == 0, out
 
 
 @case

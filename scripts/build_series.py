@@ -43,6 +43,12 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
   "shrink_reason": "<reason>",         # this, which also goes in the PR description
   "size_ok": {"acme/schema.py": "generated from schema.sql; reviewed there"},
                                        # files exempt from the size gate, each with its reason
+  "run": "interactive",                # or "auto". Interactive: every change needs the owner's decision in
+                                       # decisions.json before --land; auto: no decisions, the gates decide
+  "reasons": {"src/acme/cli.py:main": "prints the summary only; the table moved to report()",
+              "src/acme/notes.py": "comments only"},
+                                       # a reason for a change no sentence of deferred.md or a message names
+                                       # (see "The reason gate"); keyed path:qual, path:<module>, or a path
   "allow_vacuous_check": "<reason>",   # accept a check that ran zero tests, or skipped them all
   "no_check_reason": "<reason>",       # a plan with no `check`: say why, or the build refuses
   "patches": [
@@ -110,6 +116,15 @@ had: that halves the line count and nothing else. The table goes to size.md; a
 failed gate fails the build and --land refuses the series. Stacking does not
 help: the gate measures the whole series.
 
+The reason gate. Every change the series makes to the user's branch needs a reason
+(reasons.py lists them: each function, method, class or module's own code that differs, each
+file that differs otherwise). A reason is a sentence of deferred.md, a patch's message or
+defence.md that names the change as code, or an entry in the plan's "reasons". The table goes
+to reasons.md. A change with no reason fails the build, and so does a change the owner
+rejected in decisions.json that is still in the series. With "run": "interactive", --land also
+refuses while any change waits for the owner's decision; it re-reads decisions.json, so record
+the decisions and land without rebuilding. Write mode compares the base with the series.
+
 The residual is written next to the plan as residual.patch, as
 `git diff <original> <series>`: a `-` line is something the user's branch had
 and the series does not; a `+` line is something the series added. It must
@@ -132,6 +147,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from audit_diff import reviewable_lines  # noqa: E402  one count of "reviewable" for the audit and the gate
+import reasons as rs  # noqa: E402  the reason gate: every change the series makes needs its reason
 
 SHRINK = 0.5          # the series keeps at most this share of the branch's reviewable lines
 SHRINK_FLOOR = 100    # a branch with fewer reviewable lines is not gated: a 30-line fix is not halved
@@ -699,6 +715,14 @@ def build(args, plan, plan_dir, resolve):
 
     series_tip = sha(wt, "HEAD")
     shas = git(wt, "rev-list", "--reverse", f"{base}..HEAD").split()
+    # The reason gate compares the series as built at the fork point with the user's branch (or,
+    # in write mode, with the base), before any rebase brings in the target's own changes.
+    compared_from, compared = files_from or sha(top, base), series_tip
+    git(top, "update-ref", f"refs/review-ready/compared/{source or branch}", compared)    # keeps it for --land
+    reasons_ok, reason_rows, reasons_md = rs.gate(top, compared_from, compared, plan, plan_dir)
+    with open(os.path.join(plan_dir, "reasons.md"), "w") as fh:
+        fh.write(reasons_md)
+    blocking = [r for r in reasons_md.splitlines() if r.startswith(("- MISSING", "- REJECTED"))]
 
     residual, size_passed, size_md = "", True, ""
     if files_from:
@@ -797,16 +821,25 @@ def build(args, plan, plan_dir, resolve):
             print("\nresidual: none (the series reproduces the branch exactly)")
         with open(os.path.join(plan_dir, "size-gate.json"), "w") as fh:
             json.dump({"series": series_tip, "passed": size_passed}, fh)
+        with open(os.path.join(plan_dir, "reasons.json"), "w") as fh:
+            json.dump({"series": series_tip, "from": compared_from, "compared": compared, "passed": not blocking}, fh)
         print("\n" + "\n".join(l for l in size_md.splitlines() if "| OVER" in l or "| CRAMMED" in l or l.startswith("Total outside")))
+        print_reasons(reason_rows, reasons_md, plan, plan_dir)
         print(f"\n{source} has NOT moved. The series is at refs/review-ready/series/{source}: review it there "
               f"(git log {landed_on}..refs/review-ready/series/{source})" + (
                   f", and when the verdict is ACK:\n  python3 {os.path.abspath(__file__)} {os.path.abspath(args.plan)} "
-                  "--land" if size_passed else
+                  "--land" if size_passed and not blocking else
                   f".\nSIZE GATE FAILED: the series keeps too much of the branch to land. Full table in "
-                  f"{os.path.join(plan_dir, 'size.md')}"))
-        if not size_passed:
+                  f"{os.path.join(plan_dir, 'size.md')}" if not size_passed else
+                  f".\nREASON GATE FAILED: {len(blocking)} change(s) cannot land as they are. Full table in "
+                  f"{os.path.join(plan_dir, 'reasons.md')}"))
+        if not size_passed or blocking:
             sys.exit(1)
     else:
+        print_reasons(reason_rows, reasons_md, plan, plan_dir)
+        if blocking:
+            sys.exit(f"\nREASON GATE FAILED: branch {branch} was not updated. Give each change its reason and rebuild; "
+                     f"full table in {os.path.join(plan_dir, 'reasons.md')}")
         if ref_exists(top, f"refs/heads/{branch}"):
             git(top, "update-ref", f"refs/review-ready/replaced/{branch}", sha(top, f"refs/heads/{branch}"))
             print(f"  replaced branch {branch}; its previous tip is kept at refs/review-ready/replaced/{branch}")
@@ -814,6 +847,21 @@ def build(args, plan, plan_dir, resolve):
         for s in stack:
             git(top, "update-ref", f"refs/heads/{s['branch']}", shas[s["through"] - 1])
         print(f"\nbranch {branch} holds the series (write mode: no residual, nothing to land)")
+
+
+def print_reasons(rows, md, plan, plan_dir):
+    problems = [line[2:] for line in md.splitlines() if line.startswith("- ") and line[2:].split()[0] in
+                ("MISSING", "REJECTED", "WAITING", "EDIT")]
+    with_reason = sum(1 for r in rows if r["reason"])
+    print(f"\nreasons: {with_reason} of {len(rows)} change(s) to the branch have a reason (table: "
+          f"{os.path.join(plan_dir, 'reasons.md')})")
+    for line in problems[:20]:
+        print(f"  {line}")
+    if len(problems) > 20:
+        print(f"  ... and {len(problems) - 20} more")
+    if plan.get("run") == "interactive" and any(p.startswith("WAITING") for p in problems):
+        print("  interactive run: show the owner each change with its reason (reasons.md, or review_site.py), record "
+              "\"adopt\" or \"reject\" per change in decisions.json, then --land re-checks.")
 
 
 def land(args, plan, plan_dir, resolve):
@@ -842,6 +890,21 @@ def land(args, plan, plan_dir, resolve):
     if not gate.get("passed"):
         sys.exit(f"the series failed the size gate; see {os.path.join(plan_dir, 'size.md')}. Rewrite the OVER files "
                  'smaller, or give each a reason in "size_ok", then rebuild.')
+    try:
+        with open(os.path.join(plan_dir, "reasons.json")) as fh:
+            recorded = json.load(fh)
+    except (OSError, ValueError):
+        recorded = {}
+    if recorded.get("series") != new_tip or not ref_exists(top, f"refs/review-ready/compared/{source}"):
+        sys.exit("no reason-gate record for this series (reasons.json is missing or from another build): rebuild")
+    ok, _rows, md = rs.gate(top, recorded["from"], sha(top, f"refs/review-ready/compared/{source}"), plan, plan_dir)
+    with open(os.path.join(plan_dir, "reasons.md"), "w") as fh:
+        fh.write(md)
+    if not ok:
+        problems = [line[2:] for line in md.splitlines() if line.startswith("- ") and line[2:].split()[0] in
+                    ("MISSING", "REJECTED", "WAITING", "EDIT")]
+        sys.exit("the reason gate stops the landing:\n  " + "\n  ".join(problems[:20])
+                 + f"\nFull table in {os.path.join(plan_dir, 'reasons.md')}.")
 
     current = git(top, "rev-parse", "--abbrev-ref", "HEAD").strip()
     for block in git(top, "worktree", "list", "--porcelain").split("\n\n"):
