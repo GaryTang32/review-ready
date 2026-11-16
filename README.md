@@ -25,6 +25,8 @@ a branch you already have.
 
 ## What it does
 
+![One pass, end to end: your branch is audited and mapped, the problem is stated, the branch is pruned, rewritten and split; the builder's gates and a maintainer review send it back to the rewrite until both pass; then it lands with an undo and a review page.](docs/img/pipeline.svg)
+
 1. **Audits** the branch: size against noise, behaviour switches, security and
    data-correctness risks, public signatures that changed, new code that
    duplicates the tree, comments that cost more than they pay for. Then it
@@ -49,6 +51,10 @@ a branch you already have.
 7. **Lands** it on your branch, once, with a one-command undo, and hands you
    a review page: the branch's call graph and the series' on one layout, each
    function's fate and the sentence that justifies it.
+
+Before anything can land, the builder checks the series against four gates:
+
+![The builder's four gates: size, reasons, tests and comments. All pass: ready for the maintainer review. Any fails: back to the rewrite, or a written reason the reviewer will see.](docs/img/gates.svg)
 
 **Every change has a reason.** Each function the series adds, drops or
 rewrites, each module's own code that changes and each other file that
@@ -75,6 +81,8 @@ done"): no questions; the pass runs to the end, questions become open questions
 in the PR description, and you get one message when it is done.
 
 ## Your branch is safe
+
+![Your branch is safe: the pass saves a copy of your branch first, builds the series in a private worktree, and moves your branch only on --land after the review; one command undoes it.](docs/img/safety.svg)
 
 The whole pass happens *beside* your branch. The series is built on a detached
 HEAD in a private worktree outside the repo and kept in a ref; no branch is created or deleted;
