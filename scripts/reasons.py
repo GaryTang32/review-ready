@@ -21,7 +21,10 @@ Its reason is the first of:
      than Python counts when a sentence names its path or its file name;
   3. the plan's "reasons" or "scope_ok" entry for its whole file, keyed by the path, which
      covers every change in that file and is shown as such;
-  4. for a test file, a sentence that names the file.
+  4. for a test rewritten in place, a sentence that names its file.
+A sentence explains a change only when the change is its subject (named in its first three
+words) or when it says what happens to it (dropped, inlined, replaced, added, extracted, ...):
+naming a function in passing is not a reason for what was done to it.
 A change with none is MISSING.
 
 The builder runs this after every build (the reason gate): a change with no reason fails the
@@ -182,11 +185,45 @@ def file_name(path):
     return re.compile(rf"(?<![\w./-])({re.escape(path)}|{re.escape(base)})(?![\w-])")
 
 
-def mentions(pattern, texts, limit=3):
-    """[(source, sentence)] for the sentences of `texts` ([(source, text)]) that match `pattern`."""
+# A sentence that names a change explains it only when the change is its subject (named in its
+# first three words, as in "- `load()`: ...") or when it says what happens to it. Without this,
+# "the CLI prints what `load()` returns" would count as the reason `load` was dropped.
+FATE_WORDS = {
+    "dropped": re.compile(r"drop|remov|delet|\bcut\b|inlin|gone|no longer|replac|merg|\bmov|defer|fold|unused|dead\b"
+                          r"|nothing (?:calls|uses|reads|imports)|no (?:caller|user)|not needed|redundant|duplicat"
+                          r"|instead|covered by|superseded", re.I),
+    "added": re.compile(r"\badd|\bnew\b|introduc|extract|helper|factor|split|shar|reus|replac|instead|\bmov"
+                        r"|one place|so that|so the|wrap|guard|check", re.I),
+    "rewritten": re.compile(r"rewrit|simplif|\bnow\b|instead|\buses?\b|no longer|replac|chang|inlin|renam|\bmov"
+                            r"|split|shorter|same|identical|drop|remov|\badd|keep|kept|\bfix|guard|check", re.I),
+}
+
+
+# "the branch's `x()` ...; the series' `y()` ..." sets one version against the other: that is a reason for both.
+CONTRAST = re.compile(r"\bthe branch'?s?\b.*\bthe series'?", re.I | re.S)
+GROUP = re.compile(r"\btests?\b", re.I)
+
+
+def explains(sentence, pattern, fate):
+    """True when a sentence that names a change is about it: its subject, or saying what happens to it.
+
+    The subject is the text before a colon near the start ("- The docstring of `x()`: ..."), or else
+    the first three words.
+    """
+    colon = sentence.find(":")
+    head = sentence[:colon] if 0 <= colon <= 60 else " ".join(sentence.split()[:3])
+    return bool(pattern.search(head) or CONTRAST.search(sentence)
+                or (fate in FATE_WORDS and FATE_WORDS[fate].search(sentence)))
+
+
+def mentions(pattern, texts, limit=3, fate=None):
+    """[(source, sentence)] for the sentences of `texts` ([(source, text)]) that match `pattern`.
+
+    With `fate`, only the sentences that explain a change with that fate (see explains()).
+    """
     found = []
     for source, text in texts:
-        found += [(source, b) for b in blocks(text) if pattern.search(b)][:limit]
+        found += [(source, b) for b in blocks(text) if pattern.search(b) and (fate is None or explains(b, pattern, fate))][:limit]
     return found
 
 
@@ -213,10 +250,10 @@ def account(rows, plan, texts, decisions=None):
         if row["key"] in given:
             reason = dict(source="plan reasons", text=given[row["key"]])
         elif row["qual"] not in (None, MODULE):
-            hit = mentions(code_name(row["name"], row["qual"]), texts, 1)
+            hit = mentions(code_name(row["name"], row["qual"]), texts, 1, row["fate"])
             reason = dict(source=hit[0][0], text=hit[0][1]) if hit else None
         elif row["qual"] == MODULE and row.get("names"):       # a constant or an import: named by what it binds
-            hit = [h for name in row["names"] for h in mentions(code_name(name), texts, 1)]
+            hit = [h for name in row["names"] for h in mentions(code_name(name), texts, 1, row["fate"])]
             reason = dict(source=hit[0][0], text=hit[0][1]) if hit else None
         elif row["qual"] is None:
             hit = mentions(file_name(row["path"]), texts, 1)
@@ -226,8 +263,13 @@ def account(rows, plan, texts, decisions=None):
         if reason is None and row["path"] in (plan.get("scope_ok") or {}):
             reason = dict(source="plan scope_ok", text=plan["scope_ok"][row["path"]])
         if reason is None and TEST_PATH.search(row["path"]):
-            hit = mentions(file_name(row["path"]), texts, 1)
-            reason = dict(source=f"{hit[0][0]}, for the test file", text=hit[0][1]) if hit else None
+            # A test function may be covered by a sentence about its file, or about the branch's tests as a
+            # group that says what happens to them. That is enough here because each test of the branch is
+            # also accounted one by one where it can be measured: the builder runs it against the series, and
+            # one that fails (FAILING) or is left out while it still passes (DROPPED) needs its own reason.
+            hit = mentions(file_name(row["path"]), texts, 1) or [
+                h for h in mentions(GROUP, texts, 1, row["fate"]) if FATE_WORDS[row["fate"]].search(h[1])]
+            reason = dict(source=f"{hit[0][0]}, for the tests", text=hit[0][1]) if hit else None
         row["reason"] = reason
         if reason is None:
             problems.append(f"MISSING  {row['key']} ({row['kind']}, {row['fate']}): no sentence names it and the plan "
@@ -311,8 +353,11 @@ def matches(ident, entry):
         or ident.split("::")[-1].split(".")[-1] == entry
 
 
-def account_tests(failing, plan, texts):
+def account_tests(failing, plan, texts, dropped=False):
     """[(id, reason or None, problem or None)] for the branch's tests that fail against the series.
+
+    With `dropped`, the tests are ones that still pass against the series while the series leaves
+    them out: free coverage, so leaving one out needs its reason too.
 
     A test listed in the plan's "must_pass" cannot fail at all. Any other needs its reason, the
     same way a change does: a plan "reasons" entry keyed by the id, or a sentence naming the test.
@@ -321,7 +366,7 @@ def account_tests(failing, plan, texts):
     rows = []
     for ident in failing:
         name = re.split(r"::|\.", ident)[-1]
-        if any(matches(ident, entry) for entry in must):
+        if any(matches(ident, entry) for entry in must) and not dropped:
             rows.append((ident, None, f"MUST-PASS {ident}: the owner marked this test as one that must pass, and it fails"))
             continue
         reason = next((dict(source="plan reasons", text=given[k]) for k in (ident, f"test:{ident}", name) if k in given), None)
@@ -329,7 +374,8 @@ def account_tests(failing, plan, texts):
             hit = mentions(code_name(name), texts, 1)
             reason = dict(source=hit[0][0], text=hit[0][1]) if hit else None
         rows.append((ident, reason, None if reason else
-                     f"MISSING  {ident}: the branch's test fails against the series and nothing says why"))
+                     f"DROPPED  {ident}: still passes against the series, but the series leaves it out; keep it, or say why"
+                     if dropped else f"MISSING  {ident}: the branch's test fails against the series and nothing says why"))
     return rows
 
 
@@ -446,7 +492,28 @@ def self_test():
         ("another failing test passes with a sentence or a plan reason naming it",
          problems["tests/test_x.py::test_rows"] is None and problems["tests/test_y.py::test_one"] is None),
         ("a failing test nothing explains is MISSING", (problems["tests/test_y.py::TestTwo::test_two"] or "").startswith("MISSING")),
+        ("a test the series leaves out that still passes is DROPPED unless a reason names it",
+         [p for _i, _r, p in account_tests(["tests/t.py::test_resume", "tests/t.py::test_old"], {}, [
+             ("deferred.md", "- `test_old`: covered by test_new.\n")], dropped=True)]
+         == ["DROPPED  tests/t.py::test_resume: still passes against the series, but the series leaves it out; keep it, "
+             "or say why", None]),
+        ("naming a function in passing is not a reason for dropping it",
+         not mentions(code_name("load"), [("d", "The CLI prints what `load()` returns to stdout.")], 1, "dropped")),
+        ("a sentence about it, or saying what happens to it, is",
+         mentions(code_name("load"), [("d", "- `load()`: one caller, so it goes.")], 1, "dropped")
+         and mentions(code_name("load"), [("d", "The CLI no longer calls a separate `load()`: it is inlined.")], 1, "dropped")),
+        ("the text before an opening colon is the subject",
+         mentions(code_name("stops", "Ledger.stops"), [("d", "- The docstring of `Ledger.stops()`: the body says it.")], 1, "rewritten")),
+        ("setting the branch's version against the series' explains both",
+         mentions(code_name("_peak", "E._peak"), [("d", "- History: the branch's `rebuild()` recounts every entry; "
+                                                        "the series' `E._peak()` reads the stored best.")], 1, "added")),
     ]
+    tests_ = account([dict(key="tests/t.py:test_old", path="tests/t.py", qual="test_old", name="test_old", kind="function",
+                           fate="dropped", names=[])], {}, [("d", "- The branch's tests are replaced by one table.")])[1]
+    checks.append(("a test function is covered by a sentence about the tests that says what happens to them", not tests_))
+    checks.append(("but not by one that only mentions tests", bool(account(
+        [dict(key="tests/t.py:test_old", path="tests/t.py", qual="test_old", name="test_old", kind="function", fate="dropped",
+              names=[])], {}, [("d", "- The tests pass on 3.9.")])[1])))
     failed = sum(not ok for _n, ok in checks)
     for name, ok in checks:
         print(("ok   " if ok else "FAIL ") + name)
