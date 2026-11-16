@@ -43,6 +43,9 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
   "shrink_reason": "<reason>",         # this, which also goes in the PR description
   "size_ok": {"acme/schema.py": "generated from schema.sql; reviewed there"},
                                        # files exempt from the size gate, each with its reason
+  "prose_ok": {"acme/grammar.py:parse": "the grammar is the docstring; it is checked by test_grammar"},
+                                       # exempt from the comment gate, with the reason: a file, a path:qual,
+                                       # "patch NN" (its prose share and message) or "series"
   "run": "interactive",                # or "auto". Interactive: every change needs the owner's decision in
                                        # decisions.json before --land; auto: no decisions, the gates decide
   "reasons": {"src/acme/cli.py:main": "prints the summary only; the table moved to report()",
@@ -129,6 +132,14 @@ rejected in decisions.json that is still in the series. With "run": "interactive
 refuses while any change waits for the owner's decision; it re-reads decisions.json, so record
 the decisions and land without rebuilding. Write mode compares the base with the series.
 
+The comment gate. A PR the reviewer reads as prose is not reviewed as code. Each patch that adds
+40 Python lines or more keeps comments and docstrings to a quarter of them; each function or
+class the series adds or rewrites has a docstring of at most 12 lines, one line on a private
+helper or a body of 5 lines or fewer, and no more comment than code; a comment runs at most 3
+lines inside a function body and 2 elsewhere; a message body is at most 20 lines. The table goes
+to prose.md; a failure fails the build, and --land refuses, unless the plan's "prose_ok" gives
+the reason for that file, path:qual, "patch NN" or the "series".
+
 A tree that passed the check in an earlier build is not checked again: the builder keeps the
 ids of the trees that passed, with the command, in checked-trees.json, so a rebuild that only
 rewords messages or reorders nothing costs no test run. --restart forgets them.
@@ -156,6 +167,7 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from audit_diff import reviewable_lines, test_counts  # noqa: E402  one count of "reviewable" and of tests run
 import reasons as rs  # noqa: E402  the reason gate: every change the series makes needs its reason
+import comment_audit as ca  # noqa: E402  the comment gate's limits
 
 SHRINK = 0.5          # the series keeps at most this share of the branch's reviewable lines
 SHRINK_FLOOR = 100    # a branch with fewer reviewable lines is not gated: a 30-line fix is not halved
@@ -383,6 +395,67 @@ def size_gate(top, base, original, series, plan):
     return result != "FAILED", "\n".join(md) + "\n"
 
 
+def added_line_numbers(top, a, b, path):
+    """New-side line numbers of the non-blank lines commit `b` adds to `path` against `a`."""
+    nums = set()
+    for m in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", git(top, "diff", "-U0", "-w", a, b, "--", path, ok=True) or "", re.M):
+        nums |= set(range(int(m[1]), int(m[1]) + int(m[2] or 1)))
+    return nums
+
+
+def prose_gate(top, base, tip, plan):
+    """The comment gate over each commit of base..tip and its message. Returns (passed, markdown).
+
+    A PR the reviewer reads as prose is not reviewed as code: a patch may add at most SHARE comment
+    and docstring lines (once it adds SHARE_FLOOR Python lines), each function and comment it adds
+    or rewrites stays inside comment_audit's limits, and a message body stays under MESSAGE lines.
+    The plan's `prose_ok` exempts a file, a `path:qual`, a `patch NN` or the whole `series`, with
+    the reason.
+    """
+    ok_ = plan.get("prose_ok") or {}
+    rows, problems, total_code, total_prose = [], [], 0, 0
+    for i, c in enumerate(git(top, "rev-list", "--reverse", f"{base}..{tip}").split(), 1):
+        code = prose = 0
+        for path in git(top, "diff", "--name-only", "--diff-filter=AMR", f"{c}^", c, "--", "*.py").split():
+            if path in ok_:
+                continue
+            c_n, p_n, found = ca.prose_check(path, git(top, "show", f"{c}:{path}", ok=True) or "",
+                                             added_line_numbers(top, f"{c}^", c, path))
+            code, prose = code + c_n, prose + p_n
+            problems += [f"LONG     patch {i:02d} {path}:{line}: {what}" for key, line, what in found if key not in ok_]
+        total_code, total_prose = total_code + code, total_prose + prose
+        patch = f"patch {i:02d}"
+        share = prose / max(code + prose, 1)
+        verdict = "ok"
+        if code + prose >= ca.SHARE_FLOOR and share > ca.SHARE:
+            verdict = f"kept: {ok_[patch]}" if patch in ok_ else f"OVER: at most {ca.SHARE:.0%}"
+            if patch not in ok_:
+                problems.append(f"PROSE    {patch}: {prose} of {code + prose} added Python lines are comments or "
+                                f"docstrings ({share:.0%}), at most {ca.SHARE:.0%}")
+        body = ca.message_lines(git(top, "log", "-1", "--format=%B", c))
+        if body > ca.MESSAGE and patch not in ok_:
+            problems.append(f"MESSAGE  {patch}: the message body is {body} lines, at most {ca.MESSAGE}: say what was "
+                            "wrong, why this fix and how it was tested; the rest goes in the PR description")
+        rows.append(f"| {i:02d} | {code} | {prose} | {share:.0%} | {body} | {verdict} |")
+    share = total_prose / max(total_code + total_prose, 1)
+    if total_code + total_prose >= ca.SHARE_FLOOR and share > ca.SHARE and "series" not in ok_:
+        problems.append(f"PROSE    the series: {total_prose} of {total_code + total_prose} added Python lines are "
+                        f"comments or docstrings ({share:.0%}), at most {ca.SHARE:.0%}")
+    md = ["# Comments: what the series adds as prose", "",
+          f"A patch that adds {ca.SHARE_FLOOR} Python lines or more keeps comments and docstrings to {ca.SHARE:.0%} "
+          f"of them. Each function or class the series adds or rewrites: a docstring of at most {ca.LONG_DOC} lines, "
+          f"one line on a private helper or a body of {ca.SHORT_BODY} lines or fewer, and no more comment and "
+          f"docstring than code. A comment is at most {ca.BODY_BLOCK} lines inside a function body and "
+          f"{ca.COMMENT} elsewhere; longer text is a function name, a docstring or the commit message. A message "
+          f"body is at most {ca.MESSAGE} lines. The plan's `prose_ok` exempts a file, a `path:qual`, a `patch NN` or "
+          "the `series`, with the reason.", "",
+          "| patch | code | prose | prose share | message lines | verdict |", "|---:|---:|---:|---:|---:|---|", *rows, "",
+          f"Total: {total_prose} of {total_code + total_prose} added Python lines are prose ({share:.0%}). "
+          f"Gate: **{'FAILED' if problems else 'passed'}**."]
+    md += [f"- {p}" for p in problems]
+    return not problems, "\n".join(md) + "\n"
+
+
 def fresh_target(top, name):
     """Refuse a local branch that is behind its remote: `git fetch` never moves it."""
     if not name or not ref_exists(top, f"refs/heads/{name}"):
@@ -480,7 +553,7 @@ def build(args, plan, plan_dir, resolve):
     if shrink > SHRINK and not plan.get("shrink_reason"):
         sys.exit(f'"shrink" {shrink} keeps more than the default {SHRINK}: say why in "shrink_reason", which also '
                  "goes in the PR description")
-    for key in ("size_ok", "scope_ok", "overlay_ok"):
+    for key in ("size_ok", "scope_ok", "overlay_ok", "prose_ok"):
         blank = [k for k, v in (plan.get(key) or {}).items() if not str(v).strip()]
         if blank:
             sys.exit(f'"{key}" needs a reason for every path; none given for: {", ".join(blank)}')
@@ -754,6 +827,14 @@ def build(args, plan, plan_dir, resolve):
     with open(os.path.join(plan_dir, "reasons.md"), "w") as fh:
         fh.write(reasons_md)
     blocking = [r for r in reasons_md.splitlines() if r.startswith(("- MISSING", "- REJECTED"))]
+    prose_passed, prose_md = prose_gate(top, base, series_tip, plan)
+    with open(os.path.join(plan_dir, "prose.md"), "w") as fh:
+        fh.write(prose_md)
+    if not prose_passed:
+        print("\ncomments:\n" + "\n".join("  " + l[2:] for l in prose_md.splitlines() if l.startswith("- "))[:3000])
+        if not source:
+            stop(f"\nCOMMENT GATE FAILED: branch {branch} was not updated. Shorten what is listed, or give the reason "
+                 f'in "prose_ok"; full table in {os.path.join(plan_dir, "prose.md")}')
 
     residual, size_passed, size_md = "", True, ""
     test_rows, test_problems = [], []
@@ -886,7 +967,7 @@ def build(args, plan, plan_dir, resolve):
         else:
             print("\nresidual: none (the series reproduces the branch exactly)")
         with open(os.path.join(plan_dir, "size-gate.json"), "w") as fh:
-            json.dump({"series": series_tip, "passed": size_passed}, fh)
+            json.dump({"series": series_tip, "passed": size_passed, "prose_passed": prose_passed}, fh)
         with open(os.path.join(plan_dir, "reasons.json"), "w") as fh:
             json.dump({"series": series_tip, "from": compared_from, "compared": compared, "passed": not blocking,
                        "tests_passed": not test_problems}, fh)
@@ -895,12 +976,14 @@ def build(args, plan, plan_dir, resolve):
         print(f"\n{source} has NOT moved. The series is at refs/review-ready/series/{source}: review it there "
               f"(git log {landed_on}..refs/review-ready/series/{source})" + (
                   f", and when the verdict is ACK:\n  python3 {os.path.abspath(__file__)} {os.path.abspath(args.plan)} "
-                  "--land" if size_passed and not blocking else
+                  "--land" if size_passed and prose_passed and not blocking else
                   f".\nSIZE GATE FAILED: the series keeps too much of the branch to land. Full table in "
                   f"{os.path.join(plan_dir, 'size.md')}" if not size_passed else
+                  f".\nCOMMENT GATE FAILED: the series adds more prose than a reviewer should read. Full table in "
+                  f"{os.path.join(plan_dir, 'prose.md')}" if not prose_passed else
                   f".\nREASON GATE FAILED: {len(blocking)} change(s) or test(s) cannot land as they are. Tables: "
                   f"{os.path.join(plan_dir, 'reasons.md')}, {os.path.join(plan_dir, 'tests.md')}"))
-        if not size_passed or blocking:
+        if not size_passed or not prose_passed or blocking:
             sys.exit(1)
     else:
         print_reasons(reason_rows, reasons_md, plan, plan_dir)
@@ -1049,6 +1132,9 @@ def land(args, plan, plan_dir, resolve):
     if not gate.get("passed"):
         sys.exit(f"the series failed the size gate; see {os.path.join(plan_dir, 'size.md')}. Rewrite the OVER files "
                  'smaller, or give each a reason in "size_ok", then rebuild.')
+    if gate.get("prose_passed") is False:
+        sys.exit(f"the series failed the comment gate; see {os.path.join(plan_dir, 'prose.md')}. Shorten what is "
+                 'listed, or give each the reason in "prose_ok", then rebuild.')
     try:
         with open(os.path.join(plan_dir, "reasons.json")) as fh:
             recorded = json.load(fh)
