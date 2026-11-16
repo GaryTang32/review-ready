@@ -60,6 +60,11 @@ refuses one. The owner adds theirs after reading the series.
   and can defend every line. That is a statement only they can make, so the
   pre-PR pass hands the series back unsigned with `defence.md` beside it, and
   signs only when asked to. Never sign as the tool.
+- **At most 20 lines of body**, trailers not counted. The builder refuses a
+  longer one (the comment gate). A message that needs more is either two
+  patches, or carries what belongs in the PR description (the review story,
+  alternatives tried) or in `deferred.md` (the list of what was dropped and
+  why).
 - **Never describe the diff.** "Added function X, modified Y, updated
   tests" is what `git show --stat` is for. If the body only lists changes,
   delete it and start again from the problem.

@@ -205,7 +205,7 @@ Three of them change what you write:
 - A file the branch never touched needs `scope_ok`.
 - The size gate needs the rewrite, or a `size_ok` reason.
 
-Read five things it prints:
+Read six things it prints:
 
 - **The reason table**, also in `$W/reasons.md` (or any time:
   `python3 $S/reasons.py $W/plan.json`): every change the series makes to the
@@ -228,6 +228,11 @@ Read five things it prints:
   rewrite step (minimal-code.md), and each CRAMMED file is written out one
   statement to a line and then shrunk. A failed gate fails the build, and
   `--land` refuses the series.
+- **The comment table**, also in `$W/prose.md`: per patch, the Python lines
+  it adds as code and as comments or docstrings, and its message length;
+  then each function, class or comment the series adds or rewrites that is
+  over its limit (comments.md section 3a). Shorten it, or give the reason in
+  the plan's `prose_ok`. A failure fails the build, and `--land` refuses.
 - **The residual**, `git diff <the branch as the user left it> <the series>`.
   A `-` line is something their branch had and the series does not; a `+`
   line is something the series added. It must equal `deferred.md` plus your

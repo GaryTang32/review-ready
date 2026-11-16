@@ -79,6 +79,35 @@ interface with real usage examples: each can legitimately run long. What
 cannot run long is a wrapper, an accessor, a dataclass, or a five-line
 function doing one obvious thing.
 
+## 3a. The comment gate: what a series may add
+
+The budget above finds candidates in a tree. A series is held to limits, and
+the builder enforces them (`prose.md`; a failure fails the build and `--land`
+refuses):
+
+| Limit | Value | Why |
+|---|---|---|
+| Comments and docstrings, share of a patch's added Python lines | 25%, once a patch adds 40 | The PR is reviewed as code. A reviewer who reads more prose than code reviews the prose. |
+| Docstring of a function or class the series adds or rewrites | 12 lines | Past that it is a document; put it in one. |
+| Docstring of a private helper, or of a body of 5 lines or fewer | 1 line | The body is read faster than the paragraph above it. |
+| Comment and docstring of one function | no more than its code | The reader is not charged twice for one function. |
+| One comment, inside a function body | 3 lines | Room for an invariant or a trap beside the line it guards. A longer one is a function waiting for a name. |
+| One comment, anywhere else | 2 lines | Longer text about a definition is its docstring; about the change, its commit message. A banner is never allowed. |
+| Commit message body, trailers not counted | 20 lines | What was wrong, why this fix, how it was tested. The rest goes in the PR description or `deferred.md`. |
+
+Only what the series adds or rewrites is judged: a comment the branch
+inherited and the series does not touch is not the series' cost. A licence
+notice at the top of a file and tool pragmas (`# noqa`, `# fmt: off`) are not
+prose. Each limit can be lifted for one case with the plan's `prose_ok`, keyed
+by a file, a `path:qual`, `patch NN` (its prose share and message) or
+`series`, with the reason a reviewer would accept: a parser whose grammar is
+its docstring, a numerical routine with its derivation, a public interface
+whose examples are run as tests.
+
+Measured on four agent-written branches, the gate's first finding was this
+document's whole case: a 35-line docstring on a 15-line function, and a
+29-line one on a 22-line function.
+
 ## 4. Docstring shape
 
 - **One line first**, in the imperative or as a noun phrase, ending in a
