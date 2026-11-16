@@ -1456,6 +1456,30 @@ def addition_findings(mods, old, old_fp, old_sh, key, prod, tests, refs, ep_name
     return out
 
 
+def value_uses(mods, key):
+    """[(rel, line)] where a function is used without being called: passed, stored or registered.
+
+    `set_defaults(fn=cmd_export)`, `type=_finite`, `sorted(rows, key=score)`: each is a use the call
+    graph does not see. Found where the name is bound to this definition: in its own module, or
+    imported from it under any alias. Methods are left out; `obj.name` cannot be placed by name.
+    """
+    rel, qual = key
+    if "." in qual or rel not in mods:
+        return []
+    target = f"{mods[rel].name}.{qual}"
+    sites = []
+    for r, m in mods.items():
+        if m.is_test:
+            continue
+        names = ({qual} if r == rel else set()) | {bound for bound, dotted in m.imports.items() if dotted == target}
+        if not names:
+            continue
+        called = {id(n.func) for n in ast.walk(m.tree) if isinstance(n, ast.Call)}
+        sites += [(r, n.lineno) for n in ast.walk(m.tree)
+                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id in names and id(n) not in called]
+    return sorted(set(sites))
+
+
 def index_edges(mods, edges):
     """Call sites per callee (one per line), production callers per callee, callees per caller."""
     sites, callers_of, callees = defaultdict(list), defaultdict(set), defaultdict(set)
@@ -1549,8 +1573,10 @@ def focus_map(repo, base, head, src_dirs):
         loops = cm.loop_costs(node) if cm else []
         if not is_new(rel, qual):        # only the loops the branch wrote: pre-existing ones are not this PR's
             loops = [c for c in loops if int(re.search(r"line (\d+)", c).group(1)) in lines[rel]]
-        src = {c[0]: mods[c[0]].src.splitlines() for c in prod}
+        values = value_uses(mods, key)
+        src = {c[0]: mods[c[0]].src.splitlines() for c in prod + values}
         r["functions"].append(dict(
+            values=[dict(at=f"{vr}:{n}", code=src[vr][n - 1].strip()[:100]) for vr, n in values],
             where=f"{rel}:{qual}", length=d["length"], new=is_new(rel, qual), tests=len(tests), loops=loops,
             chain=[f"{cr}:{cq or '<module>'}" for cr, cq in call_chain(key, callers_of)],
             callers=[dict(at=f"{cr}:{n}", code=src[cr][n - 1].strip()[:100]) for cr, _q, n in prod],
@@ -1605,6 +1631,9 @@ def render_focus(r):
         L += [f"  - `{c['at']}`: `{c['code']}`" for c in f["callers"][:6]]
         if len(f["callers"]) > 6:
             L.append(f"  - and {len(f['callers']) - 6} more")
+        if f.get("values"):
+            L.append(f"- Used without a call (passed, stored or registered): {len(f['values'])}")
+            L += [f"  - `{c['at']}`: `{c['code']}`" for c in f["values"][:6]]
         if f["calls"]:
             L.append("- Calls: " + ", ".join(f"`{c}`" for c in f["calls"][:10]))
         L += [f"- Loop: {c}" for c in f["loops"][:3]]
@@ -1652,6 +1681,8 @@ SELF_TEST_BRANCH = {
     "pkg/cli.py": "from pkg.pipeline import run\n\ntry:\n    from pkg.loader import optional\nexcept ImportError:\n"
                   "    optional = None\n\n\ndef main():\n    run('in.csv')\n\n\nif __name__ == '__main__':\n    main()\n",
     "pkg/fmt.py": "class Formatter:\n    def fmt(self, row):\n        return row.strip()\n",
+    "pkg/commands.py": "import argparse\n\n\ndef cmd_show(a):\n    return a\n\n\ndef build():\n    p = argparse.ArgumentParser()\n"
+                       "    p.set_defaults(fn=cmd_show)\n    return p\n",
     "pkg/old_home.py": "KEPT = 1\n",
     "pkg/new_home.py": "def moved(rows):\n    total = 0\n    count = 0\n    for row in rows:\n        if row:\n"
                        "            total += len(row)\n            count += 1\n    if not count:\n"
@@ -1822,6 +1853,8 @@ def self_test():
          "`pkg/cli.py:main` -> `pkg/pipeline.py:run` -> `pkg/loader.py:load`"),
         ("a caller is shown with the line that calls", "`pkg/pipeline.py:5`: `return len(load(path))`"),
         ("test callers are counted apart", "Callers: 1 in code, 1 in tests"),
+        ("a function passed as a value is shown where it is passed",
+         "- Used without a call (passed, stored or registered): 1\n  - `pkg/commands.py:10`: `p.set_defaults(fn=cmd_show)`"),
     ]
     failed = 0
     for name, needle in checks:

@@ -64,7 +64,7 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
       "overlay": {"pipeline/loader.py": "overlays/01/pipeline/loader.py"},  # a version you wrote
       "patch": "hunks/01.patch",                              # a unified diff (git apply --index --recount)
       "check": true,                                          # false skips the check for this patch
-      "budget": 150,                                          # warn when added+deleted exceeds this. Write mode
+      "budget": 150,                                          # warn when added+deleted outside tests exceeds this. Write mode
                                                               # requires it and stops the build over it, unless
       "budget_ok": "<reason>",                                # this says why the patch cannot be smaller
       "expect_fail_before": "python3 -m unittest tests.test_loader.LoadPricesTest.test_x",
@@ -110,9 +110,10 @@ Gates the builder applies, because each was once a false pass:
 The size gate. A series that reproduces the branch line for line has been
 split, not made reviewable. After the build, the lines changed against the fork
 point in source, tests, config and docs, not counting blank lines or whitespace
-changes, are compared file by file with the user's branch: the series may keep at most
-`shrink` of them in total and in every file the branch changed by 20 lines or
-more, unless the file is in `size_ok`. A branch under 100 such lines is not
+changes, are compared with the user's branch: the series may keep at most `shrink`
+of them in total, and no file the branch changed by 20 lines or more may keep
+more than three quarters of its lines (it was not rewritten), unless the file
+is in `size_ok`. A branch under 100 such lines is not
 gated. A Python file also fails, as CRAMMED, when the series has more lines
 holding two statements, or more lines past 120 characters, than the branch
 had: that halves the line count and nothing else. The table goes to size.md; a
@@ -158,6 +159,8 @@ import reasons as rs  # noqa: E402  the reason gate: every change the series mak
 
 SHRINK = 0.5          # the series keeps at most this share of the branch's reviewable lines
 SHRINK_FLOOR = 100    # a branch with fewer reviewable lines is not gated: a 30-line fix is not halved
+PER_FILE = 0.75       # a file that keeps more than this share of its lines was not rewritten. The total does
+                      # the halving: a per-file half pushed code into whichever file had room
 FILE_FLOOR = 20       # nor is one file the branch changed by fewer lines
 LONG_LINE = 120       # a line past this that the branch did not have was run together to save lines
 
@@ -340,8 +343,8 @@ def size_gate(top, base, original, series, plan):
             verdict = f"kept: {size_ok[path]}"
         elif not b:
             verdict = "added by the series" + (f": {scope_ok[path]}" if path in scope_ok else "")
-        elif gated and b >= FILE_FLOOR and a > shrink * b:
-            verdict = f"OVER: at most {int(shrink * b)}"
+        elif gated and b >= FILE_FLOOR and a > max(PER_FILE, shrink) * b:
+            verdict = f"OVER: at most {int(max(PER_FILE, shrink) * b)}, or it was not rewritten"
             over.append(path)
         else:
             (joined_b, long_b), (joined_a, long_a) = cramming(top, original, path), cramming(top, series, path)
@@ -360,8 +363,9 @@ def size_gate(top, base, original, series, plan):
         result = "passed"
     md = ["# Size: the series against the branch", "",
           f"Non-blank lines changed against the fork point, ignoring whitespace, in source, tests, config "
-          f"and docs. The series keeps at most {shrink:.0%} (`shrink`) of the branch: in total, and in every file "
-          f"the branch changed by {FILE_FLOOR} lines or more. A Python file is CRAMMED when the series has more "
+          f"and docs. The series keeps at most {shrink:.0%} (`shrink`) of the branch in total, and no file the branch "
+          f"changed by {FILE_FLOOR} lines or more keeps more than {max(PER_FILE, shrink):.0%} of its lines, which "
+          f"would mean it was not rewritten. A Python file is CRAMMED when the series has more "
           f"statements sharing a line, or more lines past {LONG_LINE} characters, than the branch had. A file "
           f"listed in `size_ok` is exempt, with its reason.",
           "", "| file | branch | series | verdict |", "|---|---:|---:|---|", *rows, "",
@@ -658,11 +662,13 @@ def build(args, plan, plan_dir, resolve):
         git(wt, *cmd)
         ask_import()
         ns = git(wt, "show", "--numstat", "--format=", "HEAD")
-        add = dele = files = 0
+        add = dele = files = in_tests = 0
         for line in ns.splitlines():
             parts = line.split("\t")
             if len(parts) >= 3 and parts[0] != "-":
                 add += int(parts[0]); dele += int(parts[1]); files += 1
+                if TEST_PATH.search(parts[2]):
+                    in_tests += int(parts[0]) + int(parts[1])
         # The floor under everything: a series whose files do not compile is not landed,
         # with or without a test command.
         changed_py = [f for f in staged if f.endswith(".py") and os.path.exists(os.path.join(wt, f))]
@@ -722,12 +728,14 @@ def build(args, plan, plan_dir, resolve):
                 json.dump(passed_before, fh)
         rows.append((i, subject, files, add, dele, status))
         print(f"  {i:02d}/{len(patches)}  +{add:<5}-{dele:<5} {files:>2} file(s)  check={status:<14} {subject}")
-        if p.get("budget") and add + dele > p["budget"]:
+        # A function lands with its first caller and its test: the budget is for the code, not the test.
+        code_lines = add + dele - in_tests
+        if p.get("budget") and code_lines > p["budget"]:
             if source or p.get("budget_ok"):
-                print(f"warning: patch {i:02d} is {add + dele} lines against a budget of {p['budget']}; split it"
+                print(f"warning: patch {i:02d} is {code_lines} lines of code against a budget of {p['budget']}; split it"
                       + (f" (kept: {p['budget_ok']})" if p.get("budget_ok") else ""))
             else:
-                stop(f"\npatch {i:02d} ({name}) is {add + dele} lines against its budget of {p['budget']}. In write "
+                stop(f"\npatch {i:02d} ({name}) is {code_lines} lines of code against its budget of {p['budget']}. In write "
                      "mode the budget is the size check: split the patch, or write it smaller "
                      '(references/minimal-code.md). If it truly cannot be either, give the reason in "budget_ok".')
 
@@ -804,6 +812,15 @@ def build(args, plan, plan_dir, resolve):
                       f"  {len(failing)} of them fail; each needs its reason (a sentence naming the test, or a plan "
                       f"reasons entry), and none may be in must_pass. Full output: {report}")
 
+    if files_from and check and not args.no_check:
+        still_pass, trouble = dropped_tests(top, wt, files_from, check_vars, python, timeout,
+                                            {i for i, _r, _p in test_rows})
+        dropped_rows = rs.account_tests(still_pass, plan, rs.sources(plan, plan_dir), dropped=True)
+        test_rows += dropped_rows
+        test_problems += trouble + [problem for _id, _reason, problem in dropped_rows if problem]
+        if still_pass:
+            print(f"  {len(still_pass)} of the branch's test(s) the series leaves out still pass against it; each needs "
+                  "its reason, or comes back")
     must = plan.get("must_pass") or []
     if must and not args.no_check:
         test_problems += run_must_pass(must, top, wt, files_from, check, check_vars, python, timeout)
@@ -899,20 +916,53 @@ def build(args, plan, plan_dir, resolve):
         print(f"\nbranch {branch} holds the series (write mode: no residual, nothing to land)")
 
 
-def run_must_pass(must, top, wt, files_from, check, check_vars, python, timeout):
-    """Problems: each entry of the plan's must_pass that names no test, or whose test does not pass on the series.
+def branch_test_ids(tree_, ref):
+    """Every test the commit `ref` defines, as pytest ids."""
+    ids = set()
+    for path in git(tree_, "ls-tree", "-r", "--name-only", ref).split("\n"):
+        if TEST_PATH.search(path) and path.endswith(".py"):
+            ids |= set(rs.test_ids(path, git(tree_, "show", f"{ref}:{path}", ok=True) or ""))
+    return ids
 
-    The tests run as the owner's branch has them, against the series' code: the branch's version of
-    each file that holds one is put in the worktree for the run and taken out after it.
+
+def run_branch_tests(ids, top, wt, files_from, check_vars, python, timeout):
+    """(passed ids, problems, state): run tests as the owner's branch has them, against the series' code.
+
+    The branch's version of each file that holds one is put in the worktree for the run and taken
+    out after it. pytest when the interpreter has it; otherwise unittest, which runs a method by its
+    dotted name and cannot run a plain function.
     """
+    files = sorted({i.split("::")[0] for i in ids})
+    theirs = [f for f in files if files_from and git(top, "cat-file", "-e", f"{files_from}:{f}", ok=True) is not None]
+    if theirs:
+        git(wt, "checkout", files_from, "--", *theirs)
+    env = "".join(f"{k}={shlex.quote(v)} " for k, v in (check_vars or {}).items())
+    problems = []
+    if shell(f"{env}{shlex.quote(python)} -c 'import pytest'", wt, timeout, None)[0] == "ok":
+        state, out = shell(f"{env}{shlex.quote(python)} -m pytest -q -p no:cacheprovider -rA "
+                           + " ".join(shlex.quote(i) for i in sorted(ids)), wt, timeout, None)
+        passed = {re.sub(r"\[.*\]$", "", p) for p in re.findall(r"^PASSED (\S+)", out, re.M)}
+    else:
+        dotted = {i: i.split("::")[0][:-3].replace("/", ".") + "." + ".".join(i.split("::")[1:]) for i in ids if i.count("::") == 2}
+        problems += [f"{i}: a test function outside a class runs only under pytest, which this interpreter does not have"
+                     for i in ids if i not in dotted]
+        state, out = shell(f"{env}{shlex.quote(python)} -m unittest -v " + " ".join(shlex.quote(d) for d in dotted.values()),
+                           wt, timeout, None) if dotted else ("ok", "")
+        ok = {where if where.endswith("." + name) else f"{where}.{name}"
+              for name, where in re.findall(r"^(\w+) \(([\w.]+)\)[^\n]*\.\.\. ok$", out, re.M)}
+        passed = {i for i, d in dotted.items() if d in ok}
+    git(wt, "reset", "-q", "--hard", "HEAD")
+    git(wt, "clean", "-xdfq", ok=True)
+    if state in ("did not run", "timed out"):
+        problems.append(f"the tests {state}: {last_line(out)}")
+    return passed, problems, state
+
+
+def run_must_pass(must, top, wt, files_from, check, check_vars, python, timeout):
+    """Problems: each entry of the plan's must_pass that names no test, or whose test does not pass on the series."""
     if not check:
         return ["MUST-PASS the plan lists must_pass tests but has no check command to run them with"]
-    known = set()
-    for ref in filter(None, (files_from, "HEAD")):
-        tree_ = wt if ref == "HEAD" else top
-        for path in git(tree_, "ls-tree", "-r", "--name-only", ref).split("\n"):
-            if TEST_PATH.search(path) and path.endswith(".py"):
-                known |= set(rs.test_ids(path, git(tree_, "show", f"{ref}:{path}", ok=True) or ""))
+    known = branch_test_ids(wt, "HEAD") | (branch_test_ids(top, files_from) if files_from else set())
     problems, wanted = [], {}
     for entry in must:
         hits = sorted(i for i in known if rs.matches(i, entry))
@@ -921,31 +971,8 @@ def run_must_pass(must, top, wt, files_from, check, check_vars, python, timeout)
         wanted.update({h: entry for h in hits})
     if not wanted:
         return problems
-    files = sorted({i.split("::")[0] for i in wanted})
-    theirs = [f for f in files if files_from and git(top, "cat-file", "-e", f"{files_from}:{f}", ok=True) is not None]
-    if theirs:
-        git(wt, "checkout", files_from, "--", *theirs)
-    env = "".join(f"{k}={shlex.quote(v)} " for k, v in (check_vars or {}).items())
-    has_pytest = shell(f"{env}{shlex.quote(python)} -c 'import pytest'", wt, timeout, None)[0] == "ok"
-    if has_pytest:
-        state, out = shell(f"{env}{shlex.quote(python)} -m pytest -q -p no:cacheprovider -rA "
-                           + " ".join(shlex.quote(i) for i in sorted(wanted)), wt, timeout, None)
-        passed = {re.sub(r"\[.*\]$", "", p) for p in re.findall(r"^PASSED (\S+)", out, re.M)}
-    else:
-        # No pytest in this interpreter, and the skill installs nothing: unittest runs a test
-        # method by its dotted name, module.Class.method. A plain function needs pytest.
-        dotted = {i: i.split("::")[0][:-3].replace("/", ".") + "." + ".".join(i.split("::")[1:]) for i in wanted if i.count("::") == 2}
-        problems += [f"MUST-PASS {i}: a test function outside a class runs only under pytest, which this interpreter "
-                     "does not have" for i in wanted if i not in dotted]
-        state, out = shell(f"{env}{shlex.quote(python)} -m unittest -v " + " ".join(shlex.quote(d) for d in dotted.values()),
-                           wt, timeout, None) if dotted else ("ok", "")
-        ok = {f"{where}" if where.endswith("." + name) else f"{where}.{name}"
-              for name, where in re.findall(r"^(\w+) \(([\w.]+)\)[^\n]*\.\.\. ok$", out, re.M)}
-        passed = {i for i, d in dotted.items() if d in ok}
-    git(wt, "reset", "-q", "--hard", "HEAD")
-    git(wt, "clean", "-xdfq", ok=True)
-    if state in ("did not run", "timed out"):
-        return problems + [f"MUST-PASS the must-pass tests {state}: {last_line(out)}"]
+    passed, trouble, _state = run_branch_tests(set(wanted), top, wt, files_from, check_vars, python, timeout)
+    problems += [f"MUST-PASS {t}" for t in trouble]
     for ident in sorted(wanted):
         if ident not in passed and not any(p.startswith(f"MUST-PASS {ident}:") for p in problems):
             problems.append(f"MUST-PASS {ident}: the owner marked it as a test that must pass, and it does not pass "
@@ -955,10 +982,20 @@ def run_must_pass(must, top, wt, files_from, check, check_vars, python, timeout)
     return problems
 
 
+def dropped_tests(top, wt, files_from, check_vars, python, timeout, failing):
+    """The branch's tests the series no longer has (by name) that still pass against it: free coverage left out."""
+    kept = {re.split(r"::|\.", i)[-1] for i in branch_test_ids(wt, "HEAD")}
+    gone = {i for i in branch_test_ids(top, files_from) if re.split(r"::|\.", i)[-1] not in kept and i not in failing}
+    if not gone:
+        return [], []
+    passed, trouble, _state = run_branch_tests(gone, top, wt, files_from, check_vars, python, timeout)
+    return sorted(passed), [f"UNREAD   {t}" for t in trouble]
+
+
 def tests_report(rows, problems, must):
     lines = ["# Tests: the branch's own tests against the series, and the tests that must pass", "",
-             "Each of the branch's tests that fails against the series needs its reason. A test in the plan's "
-             "`must_pass` may not fail at all.", ""]
+             "Each of the branch's tests that fails against the series needs its reason, and so does each test the "
+             "series leaves out that still passes against it. A test in the plan's `must_pass` may not fail at all.", ""]
     if must:
         lines += ["Must pass: " + ", ".join(f"`{m}`" for m in must), ""]
     if rows:

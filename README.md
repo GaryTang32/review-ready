@@ -57,8 +57,9 @@ builder lists every change and refuses to land a series where one has none.
 
 **No test is lost silently.** Tests already on your target pass at every
 commit. Each of your branch's own tests that fails against the rewrite needs a
-written reason, and the tests you mark as must-pass cannot fail at all: the
-builder runs them, as you wrote them, against the rewrite.
+written reason, and so does each one the rewrite leaves out that would still
+pass. The tests you mark as must-pass cannot fail at all: the builder runs
+them, as you wrote them, against the rewrite.
 
 **Interactive or automatic.** Interactive, the default when you are in the
 conversation: you agree the problem statement, then see every change with its
@@ -138,13 +139,14 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 36 whole situations in scratch repositories |
-| `reasons.py --self-test` | 25: what counts as a change, what counts as its reason, and an owner's adopt, reject and edit |
+| `build_series.py --self-test` | 38 whole situations in scratch repositories |
+| `reasons.py --self-test` | 32: what counts as a change, what counts as its reason (a name in passing is not one), and an owner's adopt, reject and edit |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |
+| `audit_diff.py --self-test` | 8: false alarms an evaluation reported, each beside the case that must still be found |
 | `comment_audit.py --self-test` | 17, eight of which must find nothing |
-| `repo_map.py --self-test` | 46: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
+| `repo_map.py --self-test` | 47: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
 | `repo_index.py --self-test` | 14: the stored graph, its queries and its retrieval, including a match that must not be offered |
 | `review_site.py --self-test` | 17: the review page from a scratch pass: fates, reasons, the patch of each function, calls that change, a closed tag for every open one |
 

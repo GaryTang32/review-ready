@@ -603,6 +603,44 @@ def a_test_that_raises_before_its_assertion_is_called_an_error(tmp):
     assert b.errored_not_asserted(typed) and not b.errored_not_asserted(asserted)
 
 
+@case
+def a_test_the_series_leaves_out_that_still_passes_needs_a_reason(tmp):
+    # The series keeps generator support but its own test file drops test_gen, which still passes.
+    r = repo(tmp, "dt"); k = os.path.join(r, ".review-ready")
+    write(k, "overlays/01/tests/test_f.py", BASE_T)
+    over = {"overlay": {"f.py": "overlays/01/f.py", "tests/test_f.py": "overlays/01/tests/test_f.py"},
+            "paths": None, "expect_fail_before": None}
+    rc, out = build(r, patch0=over, reasons={"tests/test_f.py": "the base tests"})
+    assert rc != 0 and "DROPPED  tests/test_f.py::T::test_gen" in out, "a still-passing test was dropped silently:\n" + out
+    write(k, "deferred.md", "# Deferred\n\n- `junk()`: a debug print, dropped.\n- `test_gen`: covered by test_1 once it "
+                            "takes a list.\n")
+    rc, out = build(r, patch0=over, reasons={"tests/test_f.py": "the base tests"})
+    assert rc == 0, out
+
+
+@case
+def a_file_rewritten_to_most_of_its_length_passes_when_the_total_is_halved(tmp):
+    # parse.py is cut to 2 lines; big.py keeps 70% of its lines. The series keeps a quarter of the
+    # branch, so where the remaining lines sit is the author's choice, not the gate's.
+    r, path = verbose_branch(tmp, "pf"); k = os.path.join(r, ".review-ready")
+    sh(r, "git", "checkout", "-q", "feature")
+    write(r, "big.py", "".join(f"V{i} = {i}\n" for i in range(60)))
+    sh(r, "git", "add", "big.py"); sh(r, "git", "commit", "-qm", "big"); sh(r, "git", "checkout", "-q", "main")
+    write(k, "overlays/02/big.py", "".join(f"V{i} = {i}\n" for i in range(42)))
+    write(k, "msgs/02.txt", MSG.replace("count the rows of a generator", "add parse()") + "\nKeeps `V0` to `V41` of big.py.\n")
+    p = json.load(open(path))
+    p["patches"][1] = {"name": "parse", "message": "msgs/02.txt",
+                       "overlay": {"parse.py": "overlays/02/parse.py", "big.py": "overlays/02/big.py"}}
+    p["reasons"] = {"big.py:<module>": "drops V42 to V59, which nothing reads"}
+    json.dump(p, open(path, "w"))
+    rc, out = build(r)
+    size = open(os.path.join(k, "size.md")).read()
+    assert rc == 0 and "| `big.py` | 60 | 42 | ok |" in size, "a file at 70% failed although the total is a quarter:\n" + out + size
+    write(k, "overlays/02/big.py", "".join(f"V{i} = {i}\n" for i in range(58)))
+    rc, out = build(r)                                       # 58 of 60: kept, not rewritten
+    assert rc != 0 and "| `big.py` | 60 | 58 | OVER" in open(os.path.join(k, "size.md")).read(), out
+
+
 def main():
     failed = 0
     for fn in CASES:
