@@ -48,6 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import repo_map as rm  # noqa: E402  one parser and one resolver for the map, the index and the page
 from audit_diff import reviewable_lines  # noqa: E402  the size gate's own count
 import reasons as rs  # noqa: E402  the reason gate's own list of changes and their reasons
+import comment_audit as ca  # noqa: E402  the comment gate's own count of prose
 
 try:
     import repo_index as ri
@@ -460,6 +461,7 @@ def load_review(folder, taken):
             tests=[sum(1 for n in tests if n["before"]), sum(1 for n in tests if n["after"])],
             calls=[sum(1 for e in within if e["before"]), sum(1 for e in within if e["after"])],
             gate=gate.get("passed"),
+            prose=[prose_lines(repo, base, original), prose_lines(repo, landed, series)],
             tree=dict(modules=len(after_mods), definitions=sum(len(m.defs) for m in after_mods.values()), calls=len(after_edges))),
         size=[dict(path=p, before=lines_b.get(p, 0), after=lines_a.get(p, 0), exempt=(plan.get("size_ok") or {}).get(p))
               for p in sorted(set(lines_b) | set(lines_a), key=lambda p: (-lines_b.get(p, 0), p))],
@@ -469,7 +471,19 @@ def load_review(folder, taken):
         problem=markdown(read(folder, "problem.md")), letter=letter(read(folder, "cover-letter.md")),
         deferred=markdown(read(folder, "deferred.md")), defence=markdown(read(folder, "defence.md")),
         tests=markdown(read(folder, "tests.md")),
+        comments=markdown(read(folder, "prose.md")),
         review=markdown(read(folder, os.path.basename(rounds[-1]))) if rounds else "")
+
+
+def prose_lines(repo, a, b):
+    """Comment and docstring lines that commit `b` adds to Python files against `a` (the comment gate's count)."""
+    total = 0
+    for path in git(repo, "diff", "--name-only", "--diff-filter=AMR", a, b, "--", "*.py").split():
+        nums = set()
+        for m in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", git(repo, "diff", "-U0", "-w", a, b, "--", path), re.M):
+            nums |= set(range(int(m[1]), int(m[1]) + int(m[2] or 1)))
+        total += ca.prose_check(path, git(repo, "show", f"{b}:{path}"), nums)[1]
+    return total
 
 
 # ---------------------------------------------------------------- the page
@@ -833,6 +847,7 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
       tile("Lines to review", s.lines, `non-blank lines changed; the series keeps ${pct}%`) +
       tile("Functions and classes", s.functions, fates) +
       tile("Calls between them", s.calls, "calls inside the changed files") +
+      tile("Comment lines", s.prose, `comments and docstrings added: ${s.lines[1] ? Math.round(100 * s.prose[1] / s.lines[1]) : 0}% of the series' lines, against ${s.lines[0] ? Math.round(100 * s.prose[0] / s.lines[0]) : 0}% of the branch's`) +
       tile("Test functions", s.tests, s.tests[1] > s.tests[0] ? "more tests than the branch had" : s.tests[1] < s.tests[0] ? "fewer tests than the branch had" : "as many as the branch had");
   }
 
@@ -1028,6 +1043,7 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
       <details open><summary>PR description</summary><div class="prose">${R.letter || '<p class="muted">No cover-letter.md yet.</p>'}</div></details>
       <details><summary>Review rounds (${R.verdicts.length})</summary>${rounds ? `<ul>${rounds}</ul>` : '<p class="muted">No review yet.</p>'}
         <div class="prose">${R.review}</div></details>
+      ${R.comments ? `<details ${/FAILED/.test(R.comments) ? "open" : ""}><summary>Comments: what the series adds as prose</summary><div class="prose">${R.comments}</div></details>` : ""}
       ${R.tests ? `<details ${/FAILED/.test(R.tests) ? "open" : ""}><summary>Tests: the branch's own, and the ones that must pass</summary><div class="prose">${R.tests}</div></details>` : ""}
       ${R.defence ? `<details><summary>Defence: the questions a maintainer will ask</summary><div class="prose">${R.defence}</div></details>` : ""}`;
   }
@@ -1103,7 +1119,7 @@ class Balance(HTMLParser):
 SELF_TEST_BASE = {"pkg/__init__.py": "", "pkg/core.py": "def load(path):\n    return open(path).read()\n"}
 SELF_TEST_BRANCH = {
     "pkg/core.py": "def load(path):\n    return _strip(open(path).read())\n\n\ndef _strip(text):\n    return text.strip()\n\n\n"
-                   "def count_rows(path):\n    text = load(path)\n    return len(text.splitlines())\n",
+                   "def count_rows(path):\n    # Read the text.\n    text = load(path)\n    return len(text.splitlines())\n",
     "tests/test_core.py": "from pkg.core import count_rows\n\n\ndef test_count(tmp_path):\n    (tmp_path / 'a').write_text('x\\ny')\n"
                           "    assert count_rows(tmp_path / 'a') == 2\n",
 }
@@ -1171,6 +1187,8 @@ def self_test():
              (lambda e: bool(e) and e["before"] and not e["after"])(edge("load", "_strip"))),
             ("a test's call to the code is drawn", bool(edge("test_count", "count_rows"))),
             ("the size comes from git, the gate's count", data["stats"]["lines"][0] > data["stats"]["lines"][1] > 0),
+            ("the comment lines come from the comment gate's count",
+             data["stats"]["prose"] == [1, 0]),
             ("the last review's verdict is read", data["verdicts"][-1]["verdict"] == "ACK"),
             ("each change carries the reason the gate found", (nodes["_strip"].get("reason") or {}).get("source") == "deferred.md"),
             ("a change nothing explains shows as missing", nodes["count_rows"]["change"] and nodes["count_rows"]["reason"] is None
