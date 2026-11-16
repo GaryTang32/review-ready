@@ -38,6 +38,9 @@ spots by churn times fan-in, functions over budget, untested public
 functions, definitions no entry point reaches, functions that are copies of
 each other, modules that read switches, and the calls it could not resolve.
 Nothing is imported or executed, so it is safe on a tree you have not read.
+`python3 $S/repo_index.py build --repo <repo>` keeps the same graph in a
+SQLite file, so that a later question (who reaches this, what else is about
+that, which functions share a shape) is one query and not a re-read.
 
 Read the report in this order, because each answer narrows the next:
 

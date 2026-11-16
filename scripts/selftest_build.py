@@ -65,6 +65,7 @@ def repo(tmp, name, target_moves=False, conflict=False):
         write(r, "f.py", text); sh(r, "git", "commit", "-qam", "main moves on")
     k = os.path.join(r, ".review-ready")
     write(k, "msgs/01.txt", MSG); write(k, "overlays/01/f.py", CLEAN_F)
+    write(k, "deferred.md", "# Deferred\n\n## noise\n- `junk()`: a debug print nothing calls; dropped.\n")
     return r
 
 
@@ -347,7 +348,7 @@ def every_round_is_measured_against_the_users_branch(tmp):
 def a_later_overlay_that_undoes_an_earlier_fix_is_reported(tmp):
     r = repo(tmp, "t"); k = os.path.join(r, ".review-ready")
     write(k, "overlays/01/f.py", CLEAN_F.replace("def func1(rows):\n", "def func1(rows):\n    assert rows is not None\n"))
-    write(k, "overlays/02/f.py", CLEAN_F + "\n\nTWO = 2\n"); write(k, "msgs/02.txt", MSG.replace("count the rows", "add TWO for"))
+    write(k, "overlays/02/f.py", CLEAN_F + "\n\nTWO = 2\n"); write(k, "msgs/02.txt", MSG.replace("count the rows", "add `TWO` for"))
     path = plan(r); p = json.load(open(path))
     p["patches"].append({"name": "two", "message": "msgs/02.txt", "overlay": {"f.py": "overlays/02/f.py"}})
     json.dump(p, open(path, "w"))
@@ -378,7 +379,7 @@ def a_line_rewritten_by_a_later_patch_is_not_a_revert(tmp):
 @case
 def a_stack_is_cut_at_landing(tmp):
     r = repo(tmp, "u"); k = os.path.join(r, ".review-ready")
-    write(k, "overlays/02/f.py", CLEAN_F + "\n\nTWO = 2\n"); write(k, "msgs/02.txt", MSG.replace("count the rows", "add TWO for"))
+    write(k, "overlays/02/f.py", CLEAN_F + "\n\nTWO = 2\n"); write(k, "msgs/02.txt", MSG.replace("count the rows", "add `TWO` for"))
     path = plan(r, stack=[{"branch": "feature-1", "through": 1}]); p = json.load(open(path))
     p["patches"].append({"name": "two", "message": "msgs/02.txt", "overlay": {"f.py": "overlays/02/f.py"}})
     p["scope_ok"] = {}
@@ -457,6 +458,9 @@ def joining_statements_to_halve_the_line_count_does_not_pass_the_gate(tmp):
     assert rc != 0 and "SIZE GATE FAILED" in out and "CRAMMED" in out and "share a line" in out, out
     assert build(r, "--land")[0] != 0
     p["size_ok"] = {"parse.py": "the owner wants these on one line each"}; json.dump(p, open(path, "w"))
+    rc, out = build(r)                                   # exempt from the size gate, but the change still needs its reason
+    assert rc != 0 and "MISSING  parse.py (comments and layout" in out, out
+    p["reasons"] = {"parse.py": "the comments restated each line"}; json.dump(p, open(path, "w"))
     assert build(r)[0] == 0
 
 
@@ -496,6 +500,77 @@ def deleting_blank_lines_does_not_pass_the_gate(tmp):
 
 
 @case
+def a_change_without_a_reason_cannot_land(tmp):
+    r = repo(tmp, "rg"); k = os.path.join(r, ".review-ready")
+    write(k, "deferred.md", "# Deferred\n")                       # nothing says why junk() goes
+    tip = sh(r, "git", "rev-parse", "feature")
+    rc, out = build(r)
+    assert rc != 0 and "MISSING  f.py:junk (function, dropped)" in out and "REASON GATE FAILED" in out, out
+    assert "f.py:junk" in open(os.path.join(k, "reasons.md")).read()
+    rc, out = build(r, "--land")
+    assert rc != 0 and sh(r, "git", "rev-parse", "feature") == tip, out
+    rc, out = build(r, reasons={"f.py:junk": "a debug print nothing calls"})
+    assert rc == 0 and "2 of 2 change(s) to the branch have a reason" in out, out
+
+
+@case
+def an_interactive_run_lands_only_what_the_owner_adopted(tmp):
+    r = repo(tmp, "ri"); k = os.path.join(r, ".review-ready")
+    rc, out = build(r, run="interactive")
+    assert rc == 0 and "WAITING  f.py:junk" in out, "waiting for the owner is not a build failure:\n" + out
+    rc, out = build(r, "--land")
+    assert rc != 0 and "WAITING" in out, out
+    write(k, "decisions.json", json.dumps({"f.py:func1": "adopt", "f.py:junk": "reject"}))
+    rc, out = build(r, "--land")                                  # rejected, yet the series still drops it
+    assert rc != 0 and "REJECTED f.py:junk" in out, out
+    write(k, "decisions.json", json.dumps({"f.py:func1": "adopt", "f.py:junk": "keep it, but rename it debug()"}))
+    rc, out = build(r, "--land")
+    assert rc != 0 and "EDIT     f.py:junk" in out, out
+    write(k, "decisions.json", json.dumps({"f.py:func1": "adopt", "f.py:junk": "adopt"}))
+    rc, out = build(r, "--land")                                  # decisions are re-read: no rebuild needed
+    assert rc == 0, out
+
+
+@case
+def a_test_the_owner_marked_must_pass_cannot_be_reasoned_away(tmp):
+    # The series keeps the old func1 (no generators) and its own test file without test_gen: the
+    # check passes, so only the run of the branch's own tests shows that test_gen is lost.
+    r = repo(tmp, "mp"); k = os.path.join(r, ".review-ready")
+    write(k, "overlays/01/f.py", BASE_F.replace("return len(rows)", "return len(rows)  # sized input only"))
+    write(k, "overlays/01/tests/test_f.py", BASE_T)
+    over = {"overlay": {"f.py": "overlays/01/f.py", "tests/test_f.py": "overlays/01/tests/test_f.py"},
+            "paths": None, "expect_fail_before": None}
+    rc, out = build(r, patch0=over, reasons={"f.py:func1": "back to the base version", "tests/test_f.py": "the base tests"})
+    assert rc != 0 and "MISSING  tests.test_f.T.test_gen" in out, "a lost test of the branch went unnoticed:\n" + out
+    write(k, "deferred.md", "# Deferred\n\n- `junk()`: a debug print.\n- `test_gen`: generators are deferred to their own PR.\n")
+    rc, out = build(r, patch0=over, reasons={"f.py:func1": "back to the base version", "tests/test_f.py": "the base tests"})
+    assert rc == 0, "a lost test with its reason should build:\n" + out
+    rc, out = build(r, patch0=over, must_pass=["test_gen"],
+                    reasons={"f.py:func1": "back to the base version", "tests/test_f.py": "the base tests"})
+    assert rc != 0 and "MUST-PASS" in out and "test_gen" in out, "a must-pass test was reasoned away:\n" + out
+    assert "MUST-PASS" in open(os.path.join(k, "tests.md")).read()
+    write(k, "overlays/01/f.py", CLEAN_F)                          # the real series keeps generators: it passes
+    rc, out = build(r, must_pass=["test_gen"])
+    assert rc == 0 and "must-pass tests: 1 of 1 pass" in out, out
+    rc, out = build(r, must_pass=["test_nothing_like_this"])
+    assert rc != 0 and "names no test" in out, out
+
+
+@case
+def a_rebuild_that_only_rewords_a_message_runs_no_tests(tmp):
+    r = repo(tmp, "ct"); k = os.path.join(r, ".review-ready")
+    rc, out = build(r)
+    assert rc == 0 and "check=ok (2 tests)" in out, out
+    write(k, "msgs/01.txt", MSG.replace("Materialise it first", "Turn it into a list first"))
+    rc, out = build(r)
+    assert rc == 0 and "this tree passed before" in out, out
+    write(k, "overlays/01/f.py", CLEAN_F.replace("len(list(rows))", "sum(1 for _ in rows)"))
+    rc, out = build(r)                                       # new code: checked again
+    assert rc == 0 and "check=ok (2 tests)" in out, out
+    assert build(r, "--restart")[1].count("this tree passed before") == 0
+
+
+@case
 def write_mode_holds_each_patch_to_its_budget(tmp):
     r = repo(tmp, "wb")
     over = {"paths": None, "expect_fail_before": None, "overlay": {"f.py": "overlays/01/f.py"}}
@@ -517,6 +592,15 @@ def write_mode_makes_a_new_branch_and_lands_nothing(tmp):
     assert "len(list(rows))" in sh(r, "git", "show", "topic/new:f.py")
     rc, out = build(r, "--land")
     assert rc != 0, out
+
+
+@case
+def a_test_that_raises_before_its_assertion_is_called_an_error(tmp):
+    sys.path.insert(0, HERE)
+    import build_series as b
+    typed = "    def test_x():\n>       Config(patience=2)\nE       TypeError: unexpected keyword 'patience'\nFAILED t.py::test_x\n"
+    asserted = "E       assert 3 == 2\nFAILED t.py::test_x\n"
+    assert b.errored_not_asserted(typed) and not b.errored_not_asserted(asserted)
 
 
 def main():

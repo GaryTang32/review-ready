@@ -81,9 +81,30 @@ branch runs. "The tree already has it" compares with definitions that existed
 before the branch and still exist at its head, so a function the branch moved
 is not listed as a copy of its old self. When the target has moved since the
 fork it also compares with the functions the target gained in between, which
-the branch has never seen, and says so on the row. Run it again at the series
-head after the rewrite, if you want to see what the series still adds and
-whether anything single-use remains.
+the branch has never seen, and says so on the row. Its last list, "the tree has
+code on the same subject", is retrieval: each added function is described by
+the words in its name, its docstring and the packages it uses, and the tree
+the series lands on is ranked against them (BM25). A row names the words the
+two share. It is a lead, so open the function it names before acting; a row
+about a `main()` or a chart is usually only shared boilerplate. Run the map
+again at the series head after the rewrite, if you want to see what the
+series still adds and whether anything single-use remains.
+
+**The index** keeps what the map computes, for questions the report does not
+answer:
+
+```bash
+python3 $S/repo_index.py build --repo <repo> --ref <target>     # one SQLite file under .review-ready/
+python3 $S/repo_index.py search "download cache parquet"         # what in the tree is about these words
+python3 $S/repo_index.py about src/pkg/loader.py:load            # what else is about the same thing
+python3 $S/repo_index.py callers load                            # also: callees, reach [--up]
+python3 $S/repo_index.py sql "SELECT path, qual, lines FROM nodes WHERE dead IS NOT NULL ORDER BY lines DESC"
+```
+
+It reads the commit from git, never the checkout, records which commit it
+describes, and is opened read-only by every command but `build`. Rebuild it
+when the target moves. `export <dir>` writes `nodes.csv`, `edges.csv` and a
+`load.cypher` for a graph database; the skill itself needs none.
 
 ## 2. Where the tests run
 
@@ -132,6 +153,16 @@ Per patch:
   (for a characterization test, or a second new test).
 
 Per plan:
+- `run`: `"interactive"` or `"auto"` (SKILL.md, "Two ways to run");
+- `reasons`: a reason for a change no sentence names, or one whose matching
+  sentence does not explain it (a plan entry wins over a sentence), keyed
+  `path:qual`, `path:<module>` for a module's own code, or a path for a whole
+  file. Read the reason table row by row: a sentence matches by naming the
+  change, which is not the same as explaining it;
+- `must_pass`: tests that may not fail on the series, as pytest ids or a
+  test's name. The builder runs them as the branch has them, against the
+  series' code, and stops the build if one does not pass. Without pytest in
+  the interpreter, unittest runs the ones that are methods of a class;
 - `base`, `onto`, `source`, `check`, `import_check`, `stack`;
 - `scope_ok`, the reason for each file the branch never touched;
 - `size_ok`, the reason for each file exempt from the size gate;
@@ -172,7 +203,18 @@ Three of them change what you write:
 - A file the branch never touched needs `scope_ok`.
 - The size gate needs the rewrite, or a `size_ok` reason.
 
-Read three things it prints:
+Read five things it prints:
+
+- **The reason table**, also in `$W/reasons.md` (or any time:
+  `python3 $S/reasons.py $W/plan.json`): every change the series makes to the
+  branch, compared as syntax trees so reformatting alone is not one. Each
+  function, method or class added, dropped or rewritten; a module's own code;
+  a file whose other content differs. Its reason is the first sentence of
+  `deferred.md`, a patch's message or `defence.md` that names it as code
+  (`` `name` ``, `` `name()` ``, or name()), or the plan's `reasons` entry. A
+  MISSING row fails the build. In an interactive run each row also needs the
+  owner's decision in `$W/decisions.json`; `--land` re-reads that file, so
+  record the decisions and land without rebuilding.
 
 - **The size table**, also in `$W/size.md`: each OVER file goes back to the
   rewrite step (minimal-code.md), and each CRAMMED file is written out one
@@ -184,8 +226,11 @@ Read three things it prints:
   rewrites, line for line. A `-` line you cannot account for, in
   `deferred.md` or as a rewrite of the same behaviour, is a change you lost.
 - **The original tests**: the branch's own test files, run against the
-  rebuilt code. Every failure there is a deferred feature's test or a
-  behaviour you changed. Say which, one by one.
+  rebuilt code, and the `must_pass` tests (`$W/tests.md`). Each failing test
+  needs its reason, like a change: a sentence naming the test in
+  `deferred.md` or a message, or a plan `reasons` entry keyed by its id. One
+  that fails to import counts every test in its file. A `must_pass` test that
+  fails stops the build whatever the reason; the rewrite is what changes.
 
 Then measure: run `audit_diff.py --base <target> --head
 refs/review-ready/series/<branch>` into `audit-after.md`, and again after
@@ -230,7 +275,10 @@ refuses:
 - tracked edits it would overwrite;
 - a branch whose code changed since the build;
 - a branch checked out in another worktree;
-- a series that failed the size gate.
+- a series that failed the size gate;
+- a change with no reason, a rejected change still in the series, and, in an
+  interactive run, a change the owner has not adopted;
+- a failing `must_pass` test, or a failing test of the branch with no reason.
 
 It writes `$W/UNDO.md`: the original tip, the one command that restores it
 from any branch, the files it kept as untracked copies, and what a published
@@ -257,6 +305,28 @@ In chat, a line per item and no prose around them:
   unsigned until they have), `git rebase --signoff <target>`, and `git push
   --force-with-lease` if the branch was published, which you never do for
   them.
+
+**The review page.** One command turns the work directory into a page the
+owner can read before signing:
+
+```bash
+python3 $S/review_site.py $W --out $W/review.html      # several $W make one page with a tab each
+```
+
+It reads the branch as the owner left it and the series from git, never the
+checkout, and draws both call graphs on one layout: every function and class
+in the files either side changes, the calls between them, the code elsewhere
+they call or are called by, and the code elsewhere on the same subject
+(`repo_index.py`). Each function carries its fate (kept, rewritten, dropped,
+added by the series), its lines on both sides, the patch that changes it, and
+every sentence of `deferred.md`, the messages and `defence.md` that names it,
+so a function with no sentence is one the owner has to ask about. A change
+with no reason shows in red. In an interactive run each change has Adopt and
+Reject buttons, and "Copy decisions" gives the text for `decisions.json`. Below the
+graph: the calls that change, a table of every fate, the plan patch by patch
+(why, and how it was checked), the problem, the deferred list, the size table
+and the review rounds. `--fragment` leaves the document wrapper to a host
+that adds one. The page's script is inline: it loads nothing from anywhere.
 
 Then the PR itself: the title, the body (`cover-letter.md`), and for a stack
 which branch is which and that only the first is opened. Once the PR merges,

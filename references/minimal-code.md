@@ -72,7 +72,9 @@ In rough order of how much they usually save in agent code.
    that is `sum`, `any`, `all`, `max(key=)`, `sorted(key=)`, `dict.get`,
    `setdefault`, `Counter`, `defaultdict`, `itertools`, `pathlib`, `str.join`,
    or a pandas method. A function the tree already defines (`focus.md`:
-   "the tree already has it"). The shortest code is the code you call.
+   "the tree already has it" for a copy, "the tree has code on the same
+   subject" for one written differently; `repo_index.py search` for anything
+   else you are about to write). The shortest code is the code you call.
 5. **Data instead of branches.** An `if/elif` chain mapping a value to a
    value, or parallel branches differing in one constant, becomes a dict or a
    tuple of rows and one lookup.
@@ -137,7 +139,13 @@ behaviour-switches.md section 4), not by default.
 - A risk fix: security, look-ahead, a silent NULL coercion. Each keeps its
   own patch and test (SKILL.md ground rules).
 - Error handling at a real boundary: I/O, the network, a subprocess, input
-  from a user or a vendor file.
+  from a user or a vendor file. A file the code reads may be hand-edited,
+  torn or empty, and a field in it may be null; if the branch handled that,
+  the series does too.
+- An output guarantee other programs rely on: JSON that a strict parser
+  accepts (NaN and infinity written as null), a CSV header that does not
+  change from run to run, an exit code. "The file we read does it the same
+  way" is not a reason when the output leaves the program.
 - The test that pins the behaviour change.
 - A name or a one-line comment that tells the reader *why*.
 - Behaviour the problem needs. If the rewrite cannot be half the length
