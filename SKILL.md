@@ -28,11 +28,12 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: thirty-eight situations in scratch repos;
+(`build_series.py --self-test`: thirty-nine situations in scratch repos;
+`comment_audit.py --self-test`: the comment audit and the comment gate, 28 cases;
 `reasons.py --self-test`: what counts as a change and as its reason, 32 cases;
 `repo_map.py --self-test`: the focus map and the whole-tree map, 47 cases;
 `repo_index.py --self-test`: the stored graph and its retrieval, 14 cases;
-`review_site.py --self-test`: the review page, 17 cases).
+`review_site.py --self-test`: the review page, 18 cases).
 
 ## References: read the one the moment calls for
 
@@ -251,6 +252,9 @@ and ask whether the problem statement needs it. What goes:
 4. Comments and docstrings that restate the code or the signature, carry its
    history, narrate the line below them, or outweigh the code they sit on
    (comments.md); and type hints on code this change does not otherwise touch.
+   The builder holds what the series adds to limits: a quarter of a patch's
+   lines, 12 lines of docstring (1 on a private helper or a short body), 3
+   lines per comment in a body and 2 elsewhere (comments.md section 3a).
 5. Defensive code for states that cannot occur, `try/except` "just in case",
    broad excepts, anything that swallows an error.
 6. Duplicates of something the tree already has. The audit lists copies and
@@ -367,7 +371,8 @@ Read commit-message.md, then write one file per patch in `$W/msgs/`:
 - a blank line;
 - a body wrapped at 72 that says what is wrong in the tree, why this fix
   rather than the obvious alternative, what is deliberately out of scope,
-  and how it was tested.
+  and how it was tested, in at most 20 lines (trailers not counted). The
+  inventory of what was dropped goes in `deferred.md`, not in the message.
 
 No `Signed-off-by:` line and no `---` line, because the builder commits the
 file verbatim. Use `Fixes:` and the other trailers where they apply
@@ -389,6 +394,10 @@ what it prints:
   a MUST-PASS row means the rewrite broke what the owner said must hold:
   the fix goes in the series, never in the test;
 - **the size table** (`size.md`): every OVER file goes back to step 3;
+- **the comment table** (`prose.md`): a patch whose added Python lines are
+  more than a quarter comments and docstrings, a docstring or comment over
+  its limit (comments.md section 3a), or a message body over 20 lines; each
+  is shortened, or `prose_ok` gives the reason;
 - **the residual**: every `-` line is in `deferred.md` or rewritten;
 - **the original tests** run against the rebuilt code: every failure is
   explained.

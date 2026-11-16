@@ -55,6 +55,12 @@ rewrites, each module's own code that changes and each other file that
 differs is named, with why, in the pass's notes or commit messages. The
 builder lists every change and refuses to land a series where one has none.
 
+**The PR is read as code, not prose.** A patch may add at most a quarter of
+its Python lines as comments and docstrings; a docstring runs at most 12
+lines (one on a private helper or a short body), a comment at most 3 lines
+inside a function and 2 elsewhere, and a commit message body at most 20. The
+builder refuses more, unless the plan gives the reason for that one case.
+
 **No test is lost silently.** Tests already on your target pass at every
 commit. Each of your branch's own tests that fails against the rewrite needs a
 written reason, and so does each one the rewrite leaves out that would still
@@ -139,16 +145,16 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 38 whole situations in scratch repositories |
+| `build_series.py --self-test` | 39 whole situations in scratch repositories |
 | `reasons.py --self-test` | 32: what counts as a change, what counts as its reason (a name in passing is not one), and an owner's adopt, reject and edit |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
 | `code_metrics.py` | 39 |
 | `audit_diff.py --self-test` | 8: false alarms an evaluation reported, each beside the case that must still be found |
-| `comment_audit.py --self-test` | 17, eight of which must find nothing |
+| `comment_audit.py --self-test` | 28: the audit's 17, eight of which must find nothing, and the comment gate's 11, four of which must pass |
 | `repo_map.py --self-test` | 47: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
 | `repo_index.py --self-test` | 14: the stored graph, its queries and its retrieval, including a match that must not be offered |
-| `review_site.py --self-test` | 17: the review page from a scratch pass: fates, reasons, the patch of each function, calls that change, a closed tag for every open one |
+| `review_site.py --self-test` | 18: the review page from a scratch pass: fates, reasons, the comment share, the patch of each function, calls that change, a closed tag for every open one |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts

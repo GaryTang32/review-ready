@@ -641,6 +641,31 @@ def a_file_rewritten_to_most_of_its_length_passes_when_the_total_is_halved(tmp):
     assert rc != 0 and "| `big.py` | 60 | 58 | OVER" in open(os.path.join(k, "size.md")).read(), out
 
 
+
+@case
+def a_series_that_reads_as_prose_cannot_land(tmp):
+    # parse() is rewritten to 2 lines of code under a 15-line docstring, then its message runs to 25
+    # lines: each fails the comment gate until the plan's prose_ok gives the reason.
+    r, path = verbose_branch(tmp, "pr"); k = os.path.join(r, ".review-ready")
+    p = json.load(open(path)); p["patches"][1] = {"name": "parse", "message": "msgs/02.txt",
+                                                   "overlay": {"parse.py": "overlays/02/parse.py"}}
+    json.dump(p, open(path, "w"))
+    write(k, "overlays/02/parse.py", 'def parse(text):\n    """Split a line on commas.\n\n'
+          + "".join(f"    Note {i}.\n" for i in range(12)) + '    """\n    return text.split(\',\')\n')
+    rc, out = build(r)
+    prose = open(os.path.join(k, "prose.md")).read()
+    assert rc != 0 and "COMMENT GATE FAILED" in out and "parse(): 15-line docstring" in prose, out + prose
+    assert build(r, "--land")[0] != 0 and "refs/review-ready/landed/feature" not in refs(r)
+    p["prose_ok"] = {"parse.py:parse": "the comma rules are the spec; the tests read them"}; json.dump(p, open(path, "w"))
+    rc, out = build(r)
+    assert rc == 0, out
+    write(k, "msgs/02.txt", MSG.replace("count the rows of a generator", "add parse()")
+          + "".join(f"Detail {i} of the change.\n" for i in range(22)))
+    rc, out = build(r)
+    assert rc != 0 and "MESSAGE  patch 02" in open(os.path.join(k, "prose.md")).read(), out
+    p["prose_ok"]["patch 02"] = "the owner asked for the full derivation in the message"; json.dump(p, open(path, "w"))
+    assert build(r)[0] == 0 and build(r, "--land")[0] == 0
+
 def main():
     failed = 0
     for fn in CASES:

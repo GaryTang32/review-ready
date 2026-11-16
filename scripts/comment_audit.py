@@ -322,6 +322,109 @@ def scan_file(rel, src):
     return findings, stats
 
 
+# The comment gate: what a change may add. These are limits, not candidates: build_series.py
+# refuses a series that breaks one unless the plan's `prose_ok` gives the reason.
+SHARE = 0.25          # comment and docstring lines, as a share of a patch's added Python lines ...
+SHARE_FLOOR = 40      # ... judged once a patch adds at least this many
+SHORT_BODY = 5        # a body this short, or a private helper, gets a one-line docstring at most
+BODY_BLOCK = 3        # comment lines in a row inside a function body
+COMMENT = 2           # comment lines in a row anywhere else: a longer note is a docstring or a message
+MESSAGE = 20          # non-blank lines in a commit message body, trailers not counted
+NOTICE = re.compile(r"copyright|licen[cs]e|spdx", re.I)
+TRAILER = re.compile(r"^[A-Z][A-Za-z-]+: \S")
+
+
+def definitions_with_spans(tree):
+    """[(qualname, node)] for every function and class, methods as Class.name."""
+    out = []
+
+    def visit(body, prefix):
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                out.append((prefix + node.name, node))
+                visit(node.body, prefix + node.name + ".")
+    visit(tree.body, "")
+    return out
+
+
+def prose_check(path, src, added):
+    """(code lines, prose lines, findings) for the lines a change adds to a Python file.
+
+    `added` is the set of new-side line numbers the change adds. Prose is a comment line or a
+    docstring line. Findings are (key, line, what is wrong), key being `path:qual` for a function or
+    class and `path` otherwise; only definitions and comment blocks the change touches are judged.
+    """
+    comments, code_lines = comment_lines(src)
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return 0, 0, []
+    lines = src.splitlines()
+    docs = {}
+    for node in [tree] + [n for _q, n in definitions_with_spans(tree)]:
+        span = doc_span(node)
+        if span:
+            docs[node] = span
+    doc_lines = {ln for a, b in docs.values() for ln in range(a, b + 1)}
+    comment_only = {ln for ln, text in comments.items() if text.strip().startswith("#")}
+    prose_n = sum(1 for ln in added if ln in doc_lines or ln in comment_only)
+    code_n = sum(1 for ln in added if ln <= len(lines) and lines[ln - 1].strip()) - prose_n
+    found = []
+
+    span = docs.get(tree)
+    if span and added & set(range(span[0], span[1] + 1)) and span[1] - span[0] + 1 > MODULE_DOC:
+        found.append((path, span[0], f"module docstring is {span[1] - span[0] + 1} lines, at most {MODULE_DOC}"))
+    bodies = []
+    for qual, node in definitions_with_spans(tree):
+        start, end = node.lineno, node.end_lineno or node.lineno
+        if not added & set(range(start, end + 1)):
+            continue
+        span, key = docs.get(node), f"{path}:{qual}"
+        doc_len = span[1] - span[0] + 1 if span else 0
+        if isinstance(node, ast.ClassDef):
+            if doc_len > LONG_DOC:
+                found.append((key, span[0], f"class {qual}: {doc_len}-line docstring, at most {LONG_DOC}"))
+            continue
+        body_start = node.body[0].lineno
+        bodies.append((body_start, end))
+        doc_range = range(span[0], span[1] + 1) if span else range(0)
+        code = len([ln for ln in code_lines if body_start <= ln <= end and ln not in doc_range])
+        prose = doc_len + len([ln for ln in comment_only if body_start <= ln <= end])
+        private = node.name.startswith("_") and not node.name.endswith("__")
+        if doc_len > LONG_DOC:
+            found.append((key, span[0], f"{qual}(): {doc_len}-line docstring, at most {LONG_DOC}"))
+        elif doc_len > 1 and (private or code <= SHORT_BODY):
+            why = "a private helper" if private else f"a {code}-line body"
+            found.append((key, span[0], f"{qual}(): {doc_len}-line docstring on {why}; one line at most"))
+        if prose > max(code, 1):
+            found.append((key, start, f"{qual}(): {prose} lines of comment and docstring against {code} of code"))
+
+    run = []
+    for ln in sorted(comment_only) + [None]:
+        if run and (ln is None or ln != run[-1] + 1):
+            inside = any(a <= run[0] <= b for a, b in bodies)
+            limit = BODY_BLOCK if inside else COMMENT
+            notice = run[0] == 1 + (lines[0].startswith("#!") if lines else 0) and \
+                any(NOTICE.search(comments[r]) for r in run)
+            if len(run) > limit and added & set(run) and not notice and not PRAGMA.match(comments[run[0]].strip()):
+                where = "inside a function body" if inside else "outside a function body"
+                found.append((path, run[0], f"a {len(run)}-line banner: a section rule means the file is two files"
+                              if any(BANNER.match(comments[r]) for r in run)
+                              else f"a {len(run)}-line comment {where}, at most {limit}"))
+            run = []
+        if ln is not None and not comments[ln].strip().startswith("#!"):
+            run.append(ln)
+    return code_n, prose_n, found
+
+
+def message_lines(text):
+    """Non-blank lines of a commit message body: the subject and the closing trailer block left out."""
+    lines = text.rstrip("\n").split("\n")[1:]
+    while lines and (not lines[-1].strip() or TRAILER.match(lines[-1])):
+        lines.pop()
+    return sum(1 for line in lines if line.strip())
+
+
 def walk(root, src_dirs):
     for base, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
@@ -589,7 +692,39 @@ def sessions_between(start, end):
     return _calendar.sessions_in_range(start, end)
 '''),
     ]
+    gate = [
+        ("a long docstring on a public function", "def f(x):\n" + '    """Do it.\n' + "\n".join(["    more."] * 13)
+         + '\n    """\n    return x\n', "at most 12"),
+        ("a private helper gets one line", 'def _f(x):\n    """Do it.\n\n    Because.\n    """\n    y = x\n'
+         + "    z = y\n" * 6 + "    return z\n", "private helper"),
+        ("more comment than code", "def f(x):\n" + '    """Do it."""\n' + "    # a\n    # b\n    y = x\n"
+         + "    # c\n    # d\n    return y\n", "against"),
+        ("a 4-line comment in a body", "def f(x):\n    y = x\n" + "    y += 1\n" * 6 + "    # a\n    # b\n    # c\n"
+         + "    # d\n    return y\n", "at most 3"),
+        ("a 3-line comment at module level", "# a\n# b\n# c\nX = 1\n", "at most 2"),
+        ("a banner is named a banner", "# -------\n# Part\n# -------\nX = 1\n", "banner"),
+    ]
+    clean = [
+        ("a licence notice at the top", "#!/usr/bin/env python3\n# Copyright 2026 A.\n# Licensed MIT.\n# See LICENSE.\nX = 1\n"),
+        ("a one-line docstring on a short body, a 2-line note", '# Prices are in cents, as the\n# exchange sends them.\n'
+         'def f(x):\n    """Do it."""\n    return x\n'),
+        ("a pragma block is not prose", "# fmt: off\n# fmt: off\n# fmt: off\nX = 1\n"),
+    ]
+    results = []
+    for name, src, want in gate:
+        found = prose_check("t.py", src, set(range(1, src.count("\n") + 2)))[2]
+        results.append((name, any(want in what for _k, _l, what in found)))
+    for name, src in clean:
+        found = prose_check("t.py", src, set(range(1, src.count("\n") + 2)))[2]
+        results.append(("passes: " + name, not found))
+    untouched = "# a\n# b\n# c\nX = 1\nY = 2\n"
+    results.append(("only what the change adds is judged", not prose_check("t.py", untouched, {5})[2]))
+    results.append(("a message body is counted without its trailers",
+                    message_lines("Subject\n\nOne.\nTwo.\n\nFixes: abc\nCo-Authored-By: X <x@y>\n") == 2))
     failed = 0
+    for name, ok in results:
+        failed += not ok
+        print(("ok   " if ok else "FAIL ") + f"gate: {name}")
     for want, src in cases:
         found, _ = scan_file("t.py", src)
         kinds = {f["kind"] for f in found}
@@ -597,7 +732,7 @@ def sessions_between(start, end):
         failed += not ok
         label = want or "clean"
         print(("ok   " if ok else "FAIL ") + f"{label:12} got={sorted(kinds) or 'none'}")
-    print(f"{len(cases)} cases, {failed} failing")
+    print(f"{len(cases) + len(results)} cases, {failed} failing")
     raise SystemExit(1 if failed else 0)
 
 
