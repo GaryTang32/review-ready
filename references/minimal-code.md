@@ -124,6 +124,12 @@ the standard; for length, three rules do most of the work:
 - **One test per behaviour in the problem statement**, the smallest that
   fails without the change. An edge case gets a test only where the code has
   a branch for it.
+- **A test of the branch that still passes against the series stays**, as it
+  is or folded into a table, unless another test already checks the same
+  input and outcome; then a sentence names both. The builder runs every test
+  the series leaves out and stops on one that passes with no reason (DROPPED
+  in `tests.md`). The evaluation that added this rule lost a resume test and
+  a window test this way.
 - **One table, not six copies** (testing.md section 6): cases that differ in
   input and expected value are rows of one parametrised test.
 - **Delete** tests of the standard library, of trivial accessors, of mocks,
@@ -155,8 +161,11 @@ behaviour-switches.md section 4), not by default.
 
 The builder writes `size.md`: per file, the non-blank lines the branch
 changed and the non-blank lines the series changes, against the fork point,
-ignoring whitespace. The series may keep at most `shrink` (default 0.5) in total and
-in every file the branch changed by 20 lines or more. Branches under 100
+ignoring whitespace. The series may keep at most `shrink` (default 0.5) in total,
+and no file the branch changed by 20 lines or more may keep more than three
+quarters of its lines: such a file was carried, not rewritten. The halving is
+measured on the whole series, so where the remaining lines sit is a design
+choice, not the gate's. Branches under 100
 such lines are not gated. A failed gate fails the build, and `--land` refuses
 the series. A stack does not get around it: the gate measures the whole
 series. Nor does cramming: blank lines are not counted, so deleting them

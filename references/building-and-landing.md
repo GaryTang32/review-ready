@@ -145,7 +145,9 @@ Per patch:
 - how to build it: `paths` (whole files from the user's branch), `overlay`
   (a version you wrote), `patch` (a hand-cut diff) or `delete`;
 - `budget`, and in write mode `budget_ok` when a patch cannot fit it (the
-  build stops over budget there; in pre-PR mode it warns);
+  build stops over budget there; in pre-PR mode it warns). It counts the
+  patch's code, not its tests: a function lands with its first caller and
+  its test;
 - `author`, when the patch is a colleague's work;
 - `expect_fail_before`, a command naming ONE test that must fail on the
   parent's code and pass with the patch;
@@ -211,8 +213,14 @@ Read five things it prints:
   function, method or class added, dropped or rewritten; a module's own code;
   a file whose other content differs. Its reason is the first sentence of
   `deferred.md`, a patch's message or `defence.md` that names it as code
-  (`` `name` ``, `` `name()` ``, or name()), or the plan's `reasons` entry. A
-  MISSING row fails the build. In an interactive run each row also needs the
+  (`` `name` ``, `` `name()` ``, or name()) and either is about it (names it
+  before an opening colon, or in its first three words), sets the branch's
+  version against the series' ("the branch's `x()` ...; the series' `y()`
+  ..."), or says what happens to it (dropped, inlined, replaced, added,
+  extracted, ...), or the plan's `reasons` entry. A test function may instead
+  be covered by a sentence naming its file, or about the branch's tests as a
+  group that says what happens to them: each test is still checked one by
+  one below, by running it. A MISSING row fails the build. In an interactive run each row also needs the
   owner's decision in `$W/decisions.json`; `--land` re-reads that file, so
   record the decisions and land without rebuilding.
 
@@ -229,7 +237,9 @@ Read five things it prints:
   rebuilt code, and the `must_pass` tests (`$W/tests.md`). Each failing test
   needs its reason, like a change: a sentence naming the test in
   `deferred.md` or a message, or a plan `reasons` entry keyed by its id. One
-  that fails to import counts every test in its file. A `must_pass` test that
+  that fails to import counts every test in its file. Each test the series
+  leaves out (by name) is run against it too, and one that still passes is
+  DROPPED until it comes back or a reason names it. A `must_pass` test that
   fails stops the build whatever the reason; the rewrite is what changes.
 
 Then measure: run `audit_diff.py --base <target> --head

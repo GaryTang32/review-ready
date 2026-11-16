@@ -28,9 +28,9 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: thirty-six situations in scratch repos;
-`reasons.py --self-test`: what counts as a change and as its reason, 25 cases;
-`repo_map.py --self-test`: the focus map and the whole-tree map, 46 cases;
+(`build_series.py --self-test`: thirty-eight situations in scratch repos;
+`reasons.py --self-test`: what counts as a change and as its reason, 32 cases;
+`repo_map.py --self-test`: the focus map and the whole-tree map, 47 cases;
 `repo_index.py --self-test`: the stored graph and its retrieval, 14 cases;
 `review_site.py --self-test`: the review page, 17 cases).
 
@@ -144,7 +144,9 @@ can land, not the way the pass was run.
 - **No test is lost silently.** Every test already on the target passes at
   every patch, or the build stops. Each of the branch's own tests that fails
   against the series is a change like any other and needs its reason; a test
-  file that does not even load counts every test in it. A test in the plan's
+  file that does not even load counts every test in it. So does each test of
+  the branch the series leaves out that still passes against it: that is
+  coverage for free, and it stays unless a reason names it. A test in the plan's
   `must_pass` may not fail at all, whatever reason is offered: the builder runs
   it, as the branch has it, against the series, and refuses the build.
 - Prefer deleting to modifying, and modifying to adding; search before
