@@ -165,6 +165,11 @@ Per plan:
   test's name. The builder runs them as the branch has them, against the
   series' code, and stops the build if one does not pass. Without pytest in
   the interpreter, unittest runs the ones that are methods of a class;
+- `max_rounds` and `max_commits`: the owner's caps (SKILL.md, "The owner's
+  questions"). A plan with more patches than `max_commits` is refused before
+  anything is built. Once `max_rounds` reviews exist and the last is a NAK,
+  the builder refuses another build; `--land` refuses whenever the last
+  `review-vN.md` is a NAK;
 - `base`, `onto`, `source`, `check`, `import_check`, `stack`;
 - `scope_ok`, the reason for each file the branch never touched;
 - `size_ok`, the reason for each file exempt from the size gate;
@@ -261,7 +266,9 @@ in every message by running it; and put `Reviewer: same context` atop the
 verdict so the owner finds a second reader.
 
 Fix every NAK in the overlays (carried forward, section 3), rebuild with the
-same plan, and review again. Save each round as `review-vN.md`. The rounds
+same plan, and review again, up to the owner's `max_rounds` (three by
+default). Save each round as `review-vN.md`, with its `## Verdict:` line: the
+builder reads it to count the rounds and to refuse landing a NAK. The rounds
 stay there and in the hand-back, never in the PR body or a commit message.
 
 ## 7. Run, defend, land

@@ -28,7 +28,7 @@ serves that number or keeps the rewrite safe.
 Scripts live in `~/.claude/skills/review-ready/scripts/`; `$S` below means
 that directory. They read git and a private worktree and import nothing from
 the code under analysis. The detector modules and the builder test themselves
-(`build_series.py --self-test`: thirty-nine situations in scratch repos;
+(`build_series.py --self-test`: forty situations in scratch repos;
 `comment_audit.py --self-test`: the comment audit and the comment gate, 28 cases;
 `reasons.py --self-test`: what counts as a change and as its reason, 32 cases;
 `repo_map.py --self-test`: the focus map and the whole-tree map, 47 cases;
@@ -81,9 +81,9 @@ the plan as `"run": "interactive"` or `"run": "auto"`.
 **Interactive** (the default when the owner is in the conversation): the
 owner sees every change and adopts it before anything moves. Stop at four
 points, and nowhere else:
-1. after step 1: show the problem statement's first paragraph; the owner
-   agrees or corrects it. Ask in the same question which tests must pass
-   whatever the rewrite does, and put them in the plan's `must_pass`;
+1. after step 1: ask the owner's questions (next section) in one go: the
+   problem statement, the tests that must pass, and the caps on review
+   rounds and commits;
 2. after the first build: show every change with its reason. Generate the
    page (`review_site.py $W --out $W/review.html`) and send it; ask about
    the changes four to a question, each option naming the function, what
@@ -101,7 +101,8 @@ points, and nowhere else:
 it end to end", "tell me when it's done", or a scheduled or unattended run):
 no questions. The steps run in order to the end: the problem statement is
 derived from the request and the branch; the maintainer pass is a fresh
-subagent, up to three rounds; the series lands when both gates pass, unless
+subagent, up to `max_rounds` rounds; the series lands when the gates pass
+and the last review is an ACK, unless
 the audit found a second author or a published branch, which wait for the
 owner. Every question a step says to ask becomes an open question in the PR
 description, verbatim, and every fact you would have asked for is written as
@@ -117,6 +118,28 @@ is pushed and no PR is opened in either way unless the owner asked.
 
 Both ways hold the same bar: the size gate and the reason gate decide what
 can land, not the way the pass was run.
+
+## The owner's questions
+
+Four questions, asked together at stop 1 of an interactive run (one
+question each, with options):
+
+| Question | Options to offer | Plan key | Unanswered |
+|---|---|---|---|
+| Is this the problem? (the statement's first paragraph) | agree, or their correction | `problem.md` | — |
+| Which tests must pass whatever the rewrite does? | the guard tests you found, by name | `must_pass` | none |
+| How many rounds of maintainer review at most? | 1, 2, 3 (Recommended), 5 | `max_rounds` | 3 |
+| How many commits at most in the series? | no limit (Recommended), 3, 5, 8 | `max_commits` | no limit |
+
+A round is one maintainer review (step 7) and the rebuild that answers it.
+The commit count is the whole series, stack slices included. The builder
+holds both: a plan with more patches than `max_commits` is not built (step 4
+says how to fit it), and once `max_rounds` reviews exist and the last is a
+NAK, there is no further rebuild (step 7 says what to hand back).
+
+In an automatic run nothing is asked. A number the request gives is used
+("at most two rounds", "one commit"); otherwise the defaults. The hand-back
+states the caps the pass ran under.
 
 ## Ground rules
 
@@ -361,8 +384,17 @@ PR only and list the rest under "Followed by", because seven dependent PRs
 in one morning get silence. The size gate measures the whole series, so a
 stack never replaces the rewrite.
 
-Then write `$W/plan.json` (building-and-landing.md section 4). Do not build
-yet: the builder needs every message.
+**Within the owner's commit cap.** When `max_commits` is set and the split
+needs more, fold a preparatory patch into the patch it prepares, or move a
+whole self-contained unit to a follow-up PR named in `deferred.md`. Never
+fold a behaviour change into a patch that says `No functional change.`, and
+never drop a test to save a commit. If neither fits, ask the owner (an
+automatic run: say so in the hand-back) rather than make one patch that does
+two things.
+
+Then write `$W/plan.json` (building-and-landing.md section 4), with
+`max_rounds` and `max_commits` when the owner set them. Do not build yet: the
+builder needs every message.
 
 ## Step 5: commit messages, then build
 
@@ -444,9 +476,12 @@ under it is not an ACK.** Use a fresh subagent where the harness allows it
 
 Fix every NAK, rebuild, and review again. Stop when every patch is ACK, or
 when the remaining NAKs need a decision from the user; those become open
-questions. **Three rounds is the cap.** NAKs still standing at round three
-mean the problem statement or the split is wrong: go back to step 1 or 4,
-and tell the user which.
+questions. **The owner's `max_rounds` is the cap (three by default).** At the
+cap with NAKs still standing, there is no further round: the builder refuses
+the rebuild and `--land` refuses a NAK. Hand the series back with each
+standing NAK and the fix you propose as an open question, and say whether the
+problem statement (step 1) or the split (step 4) looks wrong. The owner can
+raise `max_rounds` to go on.
 
 ## Step 8: run it, land it, hand it back
 

@@ -74,9 +74,14 @@ pass. The tests you mark as must-pass cannot fail at all: the builder runs
 them, as you wrote them, against the rewrite.
 
 **Interactive or automatic.** Interactive, the default when you are in the
-conversation: you agree the problem statement, then see every change with its
-reason and adopt or reject it (in the chat or on the review page), and nothing
-lands until every change is adopted. Automatic ("just do it", "tell me when it's
+conversation: first you are asked four questions together. Is the problem
+statement right, which tests must pass whatever happens, how many rounds of
+maintainer review at most (three unless you say), and how many commits at
+most (no limit unless you say). Then you see every change with its reason
+and adopt or reject it (in the chat or on the review page), and nothing
+lands until every change is adopted. The builder holds both caps: a longer
+series is not built, and at the round cap a rejected series is handed back,
+not landed. Automatic ("just do it", "tell me when it's
 done"): no questions; the pass runs to the end, questions become open questions
 in the PR description, and you get one message when it is done.
 
@@ -153,7 +158,7 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 39 whole situations in scratch repositories |
+| `build_series.py --self-test` | 40 whole situations in scratch repositories |
 | `reasons.py --self-test` | 32: what counts as a change, what counts as its reason (a name in passing is not one), and an owner's adopt, reject and edit |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
