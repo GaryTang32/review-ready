@@ -52,6 +52,10 @@ The plan is JSON. Relative paths inside it resolve against the plan's directory.
               "src/acme/notes.py": "comments only"},
                                        # a reason for a change no sentence of deferred.md or a message names
                                        # (see "The reason gate"); keyed path:qual, path:<module>, or a path
+  "max_rounds": 3,                     # the owner's cap on maintainer review rounds (review-vN.md); at the cap,
+                                       # a series whose last review is a NAK is not rebuilt: it is handed back
+  "max_commits": 5,                    # the owner's cap on the patches in the series, stack slices included;
+                                       # a plan with more is refused before anything is built
   "must_pass": ["tests/test_loader.py::test_nan_is_null", "test_rejects_empty_file"],
                                        # tests that may not fail on the series, run as the user's branch has
                                        # them (pytest ids, or a test's name); one that fails stops the build
@@ -153,6 +157,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import glob
 import hashlib
 import json
 import os
@@ -175,6 +180,7 @@ PER_FILE = 0.75       # a file that keeps more than this share of its lines was 
                       # the halving: a per-file half pushed code into whichever file had room
 FILE_FLOOR = 20       # nor is one file the branch changed by fewer lines
 LONG_LINE = 120       # a line past this that the branch did not have was run together to save lines
+MAX_ROUNDS = 3        # maintainer review rounds, unless the owner set "max_rounds"
 
 TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|spec)/|(^|/)test_[^/]*\.py$|_test\.py$|(^|/)conftest\.py$")
 # Files an owner expects to find in their working directory even when the series
@@ -456,6 +462,16 @@ def prose_gate(top, base, tip, plan):
     return not problems, "\n".join(md) + "\n"
 
 
+def reviews(plan_dir):
+    """[(file, verdict)] for the maintainer's rounds, review-v1.md first; the verdict is ACK, NAK or "?"."""
+    found = []
+    for path in glob.glob(os.path.join(plan_dir, "review-v*.md")):
+        n = re.sub(r"\D", "", os.path.basename(path))
+        verdict = re.search(r"^#+\s*Verdict:\s*([A-Z]+)", open(path, errors="replace").read(), re.M)
+        found.append((int(n or 0), os.path.basename(path), verdict.group(1) if verdict else "?"))
+    return [(name, v) for _n, name, v in sorted(found)]
+
+
 def fresh_target(top, name):
     """Refuse a local branch that is behind its remote: `git fetch` never moves it."""
     if not name or not ref_exists(top, f"refs/heads/{name}"):
@@ -543,6 +559,19 @@ def build(args, plan, plan_dir, resolve):
                      "patch states the lines (added plus deleted) it may take, and the build holds it to that.")
         if "budget_ok" in p and not str(p["budget_ok"]).strip():
             sys.exit(f'patch {i}: "budget_ok" needs the reason the patch is over its budget')
+    for key in ("max_rounds", "max_commits"):
+        if key in plan and (isinstance(plan[key], bool) or not isinstance(plan[key], int) or plan[key] < 1):
+            sys.exit(f'"{key}" is the owner\'s cap: a whole number of at least 1, not {plan[key]!r}')
+    if len(patches) > plan.get("max_commits", len(patches)):
+        sys.exit(f'the plan has {len(patches)} patches and the owner capped the series at {plan["max_commits"]} '
+                 '("max_commits"). Fold a preparatory patch into the patch it prepares (never a behaviour change '
+                 "into one that says No functional change.), or defer a whole unit to a follow-up PR in deferred.md.")
+    rounds = reviews(plan_dir)
+    cap = plan.get("max_rounds", MAX_ROUNDS)
+    if len(rounds) >= cap and rounds[-1][1] != "ACK":
+        sys.exit(f"{len(rounds)} maintainer review round(s), and the owner's cap is {cap} (\"max_rounds\"); the last, "
+                 f"{rounds[-1][0]}, is a {rounds[-1][1]}. No further round: hand the series back with each standing NAK "
+                 "and the fix you propose as an open question. The owner can raise \"max_rounds\" to go on.")
     stack = plan.get("stack") or []
     ends = [s.get("through") for s in stack]
     if stack and (ends != sorted(set(ends)) or not all(isinstance(e, int) and 1 <= e < len(patches) for e in ends)):
@@ -1132,6 +1161,10 @@ def land(args, plan, plan_dir, resolve):
     if not gate.get("passed"):
         sys.exit(f"the series failed the size gate; see {os.path.join(plan_dir, 'size.md')}. Rewrite the OVER files "
                  'smaller, or give each a reason in "size_ok", then rebuild.')
+    rounds = reviews(plan_dir)
+    if rounds and rounds[-1][1] != "ACK":
+        sys.exit(f"the last maintainer review, {rounds[-1][0]}, is a {rounds[-1][1]}, not an ACK: fix the NAKs and review "
+                 "again, or, at the owner's round cap, hand the series back without landing it.")
     if gate.get("prose_passed") is False:
         sys.exit(f"the series failed the comment gate; see {os.path.join(plan_dir, 'prose.md')}. Shorten what is "
                  'listed, or give each the reason in "prose_ok", then rebuild.')
