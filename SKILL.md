@@ -47,6 +47,7 @@ touches config, data, defaults, entry points or the clock.
 | [maintainer-rules.md](references/maintainer-rules.md) | *always*, before the first prune: the bar and its reasons |
 | [review-checklist.md](references/review-checklist.md) | *always*, before the maintainer pass: the NAK list and the verdict format |
 | [building-and-landing.md](references/building-and-landing.md) | at step 0 and whenever a step points to it: the work directory, where tests run, the focus map, overlays, the plan, the build's output, landing, the hand-back |
+| [owner-questions.md](references/owner-questions.md) | at stop 1 of an interactive run: every option of the owner's four questions, with its expected impact |
 | [commit-message.md](references/commit-message.md) | before writing the first message |
 | [comments.md](references/comments.md) | when the audit reports comment findings, and in every repo audit |
 | [python-idiom.md](references/python-idiom.md) | when rewriting Python: what PEP 8, 20, 257 and 484 decide, and where they yield to the kernel rules |
@@ -121,15 +122,17 @@ can land, not the way the pass was run.
 
 ## The owner's questions
 
-Four questions, asked together at stop 1 of an interactive run (one
-question each, with options):
+Four questions, asked together at stop 1 of an interactive run, one
+question each. Read owner-questions.md first: it gives every option's
+meaning and expected impact, and each option you offer carries that as its
+description, so the owner knows what each choice changes.
 
-| Question | Options to offer | Plan key | Unanswered |
+| Question | Options | Plan key | Unanswered |
 |---|---|---|---|
 | Is this the problem? (the statement's first paragraph) | agree, or their correction | `problem.md` | — |
-| Which tests must pass whatever the rewrite does? | the guard tests you found, by name | `must_pass` | none |
+| Which tests must pass whatever the rewrite does? | the guard tests you found, by name, or none | `must_pass` | none |
 | How many rounds of maintainer review at most? | 1, 2, 3 (Recommended), 5 | `max_rounds` | 3 |
-| How many commits at most in the series? | no limit (Recommended), 3, 5, 8 | `max_commits` | no limit |
+| How many commits at most in the series? | 5, 10, 20, 40, custom, unlimited (Recommended) | `max_commits` (omitted when unlimited) | unlimited |
 
 A round is one maintainer review (step 7) and the rebuild that answers it.
 The commit count is the whole series, stack slices included. The builder

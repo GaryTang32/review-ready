@@ -76,8 +76,12 @@ them, as you wrote them, against the rewrite.
 **Interactive or automatic.** Interactive, the default when you are in the
 conversation: first you are asked four questions together. Is the problem
 statement right, which tests must pass whatever happens, how many rounds of
-maintainer review at most (three unless you say), and how many commits at
-most (no limit unless you say). Then you see every change with its reason
+maintainer review at most (1, 2, 3 or 5; three unless you say), and how many
+commits at most (5, 10, 20, 40, a number of your own, or unlimited, the
+default). Each option comes with what it changes, so you choose knowing the
+cost: fewer rounds is faster but hands more decisions back to you, and a
+tight commit cap folds preparation into bigger commits and moves the rest to
+a follow-up PR. Then you see every change with its reason
 and adopt or reject it (in the chat or on the review page), and nothing
 lands until every change is adopted. The builder holds both caps: a longer
 series is not built, and at the round cap a rejected series is handed back,
