@@ -165,6 +165,11 @@ Per plan:
   test's name. The builder runs them as the branch has them, against the
   series' code, and stops the build if one does not pass. Without pytest in
   the interpreter, unittest runs the ones that are methods of a class;
+- `max_rounds` and `max_commits`: the owner's caps (SKILL.md, "The owner's
+  questions"). A plan with more patches than `max_commits` is refused before
+  anything is built. Once `max_rounds` reviews exist and the last is a NAK,
+  the builder refuses another build; `--land` refuses whenever the last
+  `review-vN.md` is a NAK;
 - `base`, `onto`, `source`, `check`, `import_check`, `stack`;
 - `scope_ok`, the reason for each file the branch never touched;
 - `size_ok`, the reason for each file exempt from the size gate;
@@ -261,7 +266,9 @@ in every message by running it; and put `Reviewer: same context` atop the
 verdict so the owner finds a second reader.
 
 Fix every NAK in the overlays (carried forward, section 3), rebuild with the
-same plan, and review again. Save each round as `review-vN.md`. The rounds
+same plan, and review again, up to the owner's `max_rounds` (three by
+default). Save each round as `review-vN.md`, with its `## Verdict:` line: the
+builder reads it to count the rounds and to refuse landing a NAK. The rounds
 stay there and in the hand-back, never in the PR body or a commit message.
 
 ## 7. Run, defend, land
@@ -270,7 +277,10 @@ stay there and in the hand-back, never in the PR body or a commit message.
 entry point runs offline (a fixture day, last night's input copied to a temp
 dir), run it at `refs/review-ready/original/<branch>` and at the series and
 diff the outputs. Each difference maps to a named behaviour patch, or is a
-lost change. If you cannot run it, the hand-back opens with: "your runs were
+lost change. Write what you ran and what differed to `$W/run.md`, its first
+line the result ("ran the nightly job at both; outputs identical"). If you
+cannot run it, leave `run.md` out: the summary then tells the owner "nobody
+ran the series' entry point", and the hand-back opens with: "your runs were
 of the original branch; run `<entry point>` on this one before you sign."
 
 **Write `defence.md`.** The first thing that happens to a series is a
@@ -304,7 +314,24 @@ branch is the authorisation.
 
 ## 8. The hand-back
 
-In chat, a line per item and no prose around them:
+**First, the summary.** `python3 $S/summary.py $W` writes `$W/summary.md`:
+
+| Recommendation | When |
+|---|---|
+| READY TO MERGE | the series built and passed its check at every commit; the size, reason, test and comment gates passed; the commit cap holds; the last review is an ACK; nothing waits for the owner |
+| WAITING FOR YOU | everything passed, and only the owner's decisions are missing (interactive run) |
+| ANOTHER ROUND | a gate failed, the last review is a NAK, or no review ran, and the round cap leaves room |
+| NOT READY | the same, with every round the owner allowed spent: the owner decides each standing item |
+| REBUILD FIRST | the records describe an older series than the one in the ref |
+
+Under it, one row per check: its state, what was found, and the file it was
+read from. Things that do not block but that the owner should know come as
+"before you merge": nobody ran the entry point (no `run.md`), the review ran
+in the same context, `defence.md` is missing. The review page shows the same
+recommendation at its top, computed when the page is built. Open the
+hand-back with it, every reason as written.
+
+Then, in chat, a line per item and no prose around them:
 
 - a before/after table: reviewable lines, commits, noise, and the size
   gate's total;

@@ -74,11 +74,27 @@ pass. The tests you mark as must-pass cannot fail at all: the builder runs
 them, as you wrote them, against the rewrite.
 
 **Interactive or automatic.** Interactive, the default when you are in the
-conversation: you agree the problem statement, then see every change with its
-reason and adopt or reject it (in the chat or on the review page), and nothing
-lands until every change is adopted. Automatic ("just do it", "tell me when it's
+conversation: first you are asked four questions together. Is the problem
+statement right, which tests must pass whatever happens, how many rounds of
+maintainer review at most (1, 2, 3 or 5; three unless you say), and how many
+commits at most (5, 10, 20, 40, a number of your own, or unlimited, the
+default). Each option comes with what it changes, so you choose knowing the
+cost: fewer rounds is faster but hands more decisions back to you, and a
+tight commit cap folds preparation into bigger commits and moves the rest to
+a follow-up PR. Then you see every change with its reason
+and adopt or reject it (in the chat or on the review page), and nothing
+lands until every change is adopted. The builder holds both caps: a longer
+series is not built, and at the round cap a rejected series is handed back,
+not landed. Automatic ("just do it", "tell me when it's
 done"): no questions; the pass runs to the end, questions become open questions
 in the PR description, and you get one message when it is done.
+
+**A verdict you can check.** The pass ends with a summary that recommends
+one of: ready to merge, another round, not ready, waiting for you, or
+rebuild first. Every reason names the file that proves it (the size table,
+the reason table, the test results, the last review), and the things worth
+doing before you merge, such as running the code yourself, are listed
+separately. The review page opens with the same summary.
 
 ## Your branch is safe
 
@@ -153,7 +169,7 @@ absent and reports green.
 
 | Suite | Cases |
 |---|---|
-| `build_series.py --self-test` | 39 whole situations in scratch repositories |
+| `build_series.py --self-test` | 40 whole situations in scratch repositories |
 | `reasons.py --self-test` | 32: what counts as a change, what counts as its reason (a name in passing is not one), and an owner's adopt, reject and edit |
 | `risk_detectors.py` | 72 detectors + 24 syntax-tree programs |
 | `switch_detectors.py` | 33 detectors + 3 commit-level rules |
@@ -162,7 +178,8 @@ absent and reports green.
 | `comment_audit.py --self-test` | 28: the audit's 17, eight of which must find nothing, and the comment gate's 11, four of which must pass |
 | `repo_map.py --self-test` | 47: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
 | `repo_index.py --self-test` | 14: the stored graph, its queries and its retrieval, including a match that must not be offered |
-| `review_site.py --self-test` | 18: the review page from a scratch pass: fates, reasons, the comment share, the patch of each function, calls that change, a closed tag for every open one |
+| `summary.py --self-test` | 12: one scratch pass per recommendation, a stale record, a same-context review and a series built before the comment gate |
+| `review_site.py --self-test` | 19: the review page from a scratch pass: the recommendation, fates, reasons, the comment share, the patch of each function, calls that change, a closed tag for every open one |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts

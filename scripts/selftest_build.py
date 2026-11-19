@@ -666,6 +666,29 @@ def a_series_that_reads_as_prose_cannot_land(tmp):
     p["prose_ok"]["patch 02"] = "the owner asked for the full derivation in the message"; json.dump(p, open(path, "w"))
     assert build(r)[0] == 0 and build(r, "--land")[0] == 0
 
+
+@case
+def the_owners_caps_on_commits_and_review_rounds_hold(tmp):
+    # Two patches against a cap of one is refused before anything is built; one review round that
+    # NAKs against a cap of one stops the next build; a NAK never lands; raising the cap goes on.
+    r, path = verbose_branch(tmp, "cap"); k = os.path.join(r, ".review-ready")
+    p = json.load(open(path)); p["patches"][1] = {"name": "parse", "message": "msgs/02.txt",
+                                                   "overlay": {"parse.py": "overlays/02/parse.py"}}
+    p["max_commits"] = 1; json.dump(p, open(path, "w"))
+    rc, out = build(r)
+    assert rc != 0 and "max_commits" in out and "refs/review-ready/series/feature" not in refs(r), out
+    p["max_commits"] = 2; p["max_rounds"] = 1; json.dump(p, open(path, "w"))
+    assert build(r)[0] == 0
+    write(k, "review-v1.md", "# Review\n\n## Verdict: NAK (1 of 2 patches need work)\n")
+    rc, out = build(r)
+    assert rc != 0 and "max_rounds" in out and "hand the series back" in out, out
+    rc, out = build(r, "--land")
+    assert rc != 0 and "not an ACK" in out and "refs/review-ready/landed/feature" not in refs(r), out
+    p["max_rounds"] = 2; json.dump(p, open(path, "w"))
+    assert build(r)[0] == 0
+    write(k, "review-v2.md", "# Review\n\n## Verdict: ACK\n")
+    assert build(r, "--land")[0] == 0
+
 def main():
     failed = 0
     for fn in CASES:
