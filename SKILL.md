@@ -33,7 +33,8 @@ the code under analysis. The detector modules and the builder test themselves
 `reasons.py --self-test`: what counts as a change and as its reason, 32 cases;
 `repo_map.py --self-test`: the focus map and the whole-tree map, 47 cases;
 `repo_index.py --self-test`: the stored graph and its retrieval, 14 cases;
-`review_site.py --self-test`: the review page, 18 cases).
+`review_site.py --self-test`: the review page, 19 cases;
+`summary.py --self-test`: the end-of-pass recommendation, 12 cases).
 
 ## References: read the one the moment calls for
 
@@ -486,18 +487,27 @@ standing NAK and the fix you propose as an open question, and say whether the
 problem statement (step 1) or the split (step 4) looks wrong. The owner can
 raise `max_rounds` to go on.
 
+**After each round, let the records decide.** `python3 $S/summary.py $W`
+reads what the pass wrote and recommends READY TO MERGE, ANOTHER ROUND, NOT
+READY, WAITING FOR YOU or REBUILD FIRST, each reason naming the file that
+proves it. ANOTHER ROUND lists what to fix; do that, rebuild, review again.
+
 ## Step 8: run it, land it, hand it back
 
 Run the entry point on the original and on the series where it runs
-offline, write `defence.md`, land with `build_series.py $W/plan.json
+offline and record what you ran and what differed in `run.md`, write
+`defence.md`, land with `build_series.py $W/plan.json
 --land`, and hand back. Each is in building-and-landing.md section 7 and 8.
 Landing refuses a series that failed the size gate or the reason gate, and,
 in an interactive run, one with a change the owner has not adopted. **Ask
 before landing** when the audit showed more than one author or a published
 branch; otherwise, in an automatic run, the request to clean the branch is
 the authorisation. The hand-back leads
-with the before/after size and ends with the undo command copied from
-`UNDO.md`. Give the owner the review page too: `python3 $S/review_site.py $W
+with the summary: run `summary.py $W` once more after landing, and open with
+its recommendation and every reason it gives, as written, each with its
+source file. Never state a recommendation the summary does not give; if you
+disagree with it, say so beside it and why. Then the before/after size, and
+last the undo command copied from `UNDO.md`. Give the owner the review page too: `python3 $S/review_site.py $W
 --out $W/review.html` draws the branch's call graph and the series' on one
 layout, with each function's fate, the sentence that justifies it, the plan
 and the evidence (building-and-landing.md section 8). Do not push or open

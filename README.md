@@ -89,6 +89,13 @@ not landed. Automatic ("just do it", "tell me when it's
 done"): no questions; the pass runs to the end, questions become open questions
 in the PR description, and you get one message when it is done.
 
+**A verdict you can check.** The pass ends with a summary that recommends
+one of: ready to merge, another round, not ready, waiting for you, or
+rebuild first. Every reason names the file that proves it (the size table,
+the reason table, the test results, the last review), and the things worth
+doing before you merge, such as running the code yourself, are listed
+separately. The review page opens with the same summary.
+
 ## Your branch is safe
 
 ![Your branch is safe: the pass saves a copy of your branch first, builds the series in a private worktree, and moves your branch only on --land after the review; one command undoes it.](docs/img/safety.svg)
@@ -171,7 +178,8 @@ absent and reports green.
 | `comment_audit.py --self-test` | 28: the audit's 17, eight of which must find nothing, and the comment gate's 11, four of which must pass |
 | `repo_map.py --self-test` | 47: the focus map and the whole-tree map, each against a scratch project with one planted case per rule |
 | `repo_index.py --self-test` | 14: the stored graph, its queries and its retrieval, including a match that must not be offered |
-| `review_site.py --self-test` | 18: the review page from a scratch pass: fates, reasons, the comment share, the patch of each function, calls that change, a closed tag for every open one |
+| `summary.py --self-test` | 12: one scratch pass per recommendation, a stale record, a same-context review and a series built before the comment gate |
+| `review_site.py --self-test` | 19: the review page from a scratch pass: the recommendation, fates, reasons, the comment share, the patch of each function, calls that change, a closed tag for every open one |
 
 The builder is the only script that can move anything of yours, so its tests
 are whole situations rather than inputs: each one creates a repository, puts
