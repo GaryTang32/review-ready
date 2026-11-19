@@ -49,6 +49,7 @@ import repo_map as rm  # noqa: E402  one parser and one resolver for the map, th
 from audit_diff import reviewable_lines  # noqa: E402  the size gate's own count
 import reasons as rs  # noqa: E402  the reason gate's own list of changes and their reasons
 import comment_audit as ca  # noqa: E402  the comment gate's own count of prose
+import summary as sm  # noqa: E402  the end-of-pass recommendation, computed from the same records
 
 try:
     import repo_index as ri
@@ -472,7 +473,18 @@ def load_review(folder, taken):
         deferred=markdown(read(folder, "deferred.md")), defence=markdown(read(folder, "defence.md")),
         tests=markdown(read(folder, "tests.md")),
         comments=markdown(read(folder, "prose.md")),
+        summary=recommendation(folder),
         review=markdown(read(folder, os.path.basename(rounds[-1]))) if rounds else "")
+
+
+def recommendation(folder):
+    """{verdict, html}: summary.py's recommendation, computed now rather than read from a summary.md that may be stale."""
+    try:
+        verdict, md = sm.summarise(folder)
+    except (OSError, ValueError, KeyError):
+        return None
+    body = re.sub(r"^## Recommendation: .*\n+", "", md.split("\n", 2)[2])
+    return dict(verdict=verdict, html=markdown(body))
 
 
 def prose_lines(repo, a, b):
@@ -688,6 +700,7 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
   border: 1px solid var(--line); border-radius: 8px; padding: 10px }
 .decisions .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center }
 .btn { border: 1px solid var(--ink); background: var(--ink); color: var(--bg); border-radius: 8px; padding: 7px 14px; cursor: pointer; font-weight: 600 }
+  .summary td code { white-space: nowrap; }
 </style>
 
 <div class="page">
@@ -828,7 +841,8 @@ footer { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line
       <div class="refs"><span>branch as written <code>${esc(R.sha.original.slice(0, 10))}</code></span>
         <span>forked at <code>${esc(R.sha.base.slice(0, 10))}</code></span>
         <span>series <code>${esc(R.sha.series.slice(0, 10))}</code> on <code>${esc(R.onto)}</code> at <code>${esc(R.sha.landed.slice(0, 10))}</code></span></div>
-      <div class="chips">${gate}${reasons}${review}${run}<span class="chip plain">${R.patches.length} patch${R.patches.length > 1 ? "es" : ""}</span></div>`;
+      <div class="chips">${gate}${reasons}${review}${run}<span class="chip plain">${R.patches.length} patch${R.patches.length > 1 ? "es" : ""}</span></div>
+      ${R.summary ? `<details class="summary" open><summary><span class="chip ${R.summary.verdict === "READY TO MERGE" ? "good" : R.summary.verdict === "WAITING FOR YOU" ? "wait" : "bad"}">${esc(R.summary.verdict)}</span> the recommendation, and the evidence for it</summary><div class="prose">${R.summary.html}</div></details>` : ""}`;
   }
 
   function tile(label, pair, note) {
@@ -1187,6 +1201,9 @@ def self_test():
              (lambda e: bool(e) and e["before"] and not e["after"])(edge("load", "_strip"))),
             ("a test's call to the code is drawn", bool(edge("test_count", "count_rows"))),
             ("the size comes from git, the gate's count", data["stats"]["lines"][0] > data["stats"]["lines"][1] > 0),
+            ("the page carries the end-of-pass recommendation, with its evidence",
+             (data.get("summary") or {}).get("verdict") in ("READY TO MERGE", "ANOTHER ROUND", "NOT READY", "WAITING FOR YOU",
+                                                            "REBUILD FIRST") and "evidence" in data["summary"]["html"].lower()),
             ("the comment lines come from the comment gate's count",
              data["stats"]["prose"] == [1, 0]),
             ("the last review's verdict is read", data["verdicts"][-1]["verdict"] == "ACK"),
